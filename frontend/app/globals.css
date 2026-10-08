@@ -21,7 +21,7 @@ button{cursor:pointer}
 .searchLabelRow{display:flex;justify-content:space-between;align-items:center;margin-bottom:11px}
 .searchLabelRow label{font-weight:700;font-size:14px}
 .searchLabelRow span{font-size:10px;font-weight:700;color:#98a2b3;letter-spacing:.1em}
-textarea{display:block;width:100%;min-height:112px;resize:vertical;border:1px solid #d0d5dd;border-radius:12px;padding:15px 16px;color:var(--ink);background:#fff;outline:none;line-height:1.5}
+textarea{display:block;width:100%;min-height:70px;max-height:130px;resize:vertical;border:1px solid #d0d5dd;border-radius:12px;padding:12px 14px;color:var(--ink);background:#fff;outline:none;line-height:1.5}
 textarea::placeholder{color:#98a2b3}
 textarea:focus{border-color:#84adff;box-shadow:0 0 0 4px #e8f0ff}
 textarea:disabled{background:#f8fafc}

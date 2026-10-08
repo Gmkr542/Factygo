@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
@@ -10,20 +11,22 @@ from app.schemas.investigation import Source
 
 
 class ResearchService:
-    """Free web research with resilient search-result/snippet retrieval.
+    """Fast, resilient free-web research.
 
-    Search snippets remain usable when an individual destination page blocks
-    server-side fetching. This prevents Render/network restrictions from
-    turning a successful search into a false `no_results` response.
+    Search snippets are immediately usable evidence. Destination pages are
+    optional enrichment and are fetched with short timeouts/concurrency so a
+    blocked page cannot stall an investigation.
     """
 
     SEARCH_URLS = (
         "https://html.duckduckgo.com/html/",
         "https://lite.duckduckgo.com/lite/",
     )
-    TIMEOUT = httpx.Timeout(12.0, connect=8.0)
-    MAX_RESULTS = 12
-    MAX_PAGE_CHARS = 18000
+    SEARCH_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
+    PAGE_TIMEOUT = httpx.Timeout(3.5, connect=2.0)
+    MAX_RESULTS = 10
+    MAX_PAGE_FETCHES = 5
+    MAX_PAGE_CHARS = 16000
 
     OFFICIAL_DOMAINS = {
         "eci.gov.in": ("official_electoral", 1.0),
@@ -31,23 +34,19 @@ class ResearchService:
         "sansad.in": ("official_parliament", 1.0),
         "pmindia.gov.in": ("official_government", 1.0),
         "india.gov.in": ("official_government", 1.0),
-        "supremecourtofindia.nic.in": ("official_judiciary", 1.0),
         "sci.gov.in": ("official_judiciary", 1.0),
+        "supremecourtofindia.nic.in": ("official_judiciary", 1.0),
         "inc.in": ("party_official", 0.65),
         "bjp.org": ("party_official", 0.65),
     }
     NEWS_DOMAINS = {
         "reuters.com", "apnews.com", "bbc.com", "thehindu.com",
         "indianexpress.com", "economictimes.indiatimes.com", "news18.com",
+        "ndtv.com", "hindustantimes.com", "timesofindia.indiatimes.com",
     }
 
     def search(self, query: str) -> list[dict]:
         queries = self._build_queries(query)
-        documents: list[dict] = []
-        seen: set[str] = set()
-        search_attempts = 0
-        successful_searches = 0
-
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -57,49 +56,80 @@ class ResearchService:
             "Accept": "text/html,application/xhtml+xml",
         }
 
-        with httpx.Client(
-            timeout=self.TIMEOUT,
-            follow_redirects=True,
-            headers=headers,
-        ) as client:
-            for search_query in queries:
-                search_attempts += 1
-                results = self._search_once(client, search_query)
-                if results:
-                    successful_searches += 1
+        # Search in parallel. A blocked provider/query no longer serially stalls
+        # the whole investigation.
+        found: list[dict] = []
+        seen: set[str] = set()
+
+        def run_search(q: str) -> list[dict]:
+            with httpx.Client(
+                timeout=self.SEARCH_TIMEOUT,
+                follow_redirects=True,
+                headers=headers,
+            ) as client:
+                return self._search_once(client, q)
+
+        with ThreadPoolExecutor(max_workers=min(3, len(queries))) as pool:
+            futures = [pool.submit(run_search, q) for q in queries]
+            for future in as_completed(futures):
+                try:
+                    results = future.result()
+                except Exception:
+                    results = []
                 for item in results:
-                    url = item["url"]
+                    url = item.get("url", "")
                     if not url or url in seen:
                         continue
                     seen.add(url)
                     source_type, score = self._source_profile(url)
-                    documents.append({
-                        "title": item["title"][:300],
+                    found.append({
+                        "title": item.get("title", "Untitled")[:300],
                         "url": url,
-                        "snippet": item["snippet"][:1500],
+                        "snippet": item.get("snippet", "")[:1800],
                         "source_score": score,
                         "source_type": source_type,
+                        # Search snippets are valid fallback research material.
+                        "text": item.get("snippet", ""),
+                        "page_retrieved": False,
+                        "research_status": "search_snippet_only",
                     })
-                    if len(documents) >= self.MAX_RESULTS:
+                    if len(found) >= self.MAX_RESULTS:
                         break
-                if len(documents) >= self.MAX_RESULTS:
+                if len(found) >= self.MAX_RESULTS:
                     break
 
-            # Try original pages, but NEVER discard a result if page retrieval fails.
-            for document in documents:
-                page_text = self._fetch_page(client, document["url"])
-                document["text"] = page_text or document.get("snippet", "")
-                document["page_retrieved"] = bool(page_text)
-                document["retrieved"] = bool(document.get("text"))
+        if not found:
+            return []
 
-        # Preserve search-result snippets as evidence when destination fetches fail.
-        for document in documents:
-            document["research_status"] = (
-                "page_retrieved"
-                if document.get("page_retrieved")
-                else "search_snippet_only"
-            )
-        return [d for d in documents if d.get("retrieved")]
+        # Enrich only the top few pages. Never remove snippet-only results.
+        candidates = found[: self.MAX_PAGE_FETCHES]
+
+        def fetch_one(document: dict) -> tuple[str, str]:
+            try:
+                with httpx.Client(
+                    timeout=self.PAGE_TIMEOUT,
+                    follow_redirects=True,
+                    headers=headers,
+                ) as client:
+                    return document["url"], self._fetch_page(client, document["url"])
+            except Exception:
+                return document["url"], ""
+
+        with ThreadPoolExecutor(max_workers=min(5, len(candidates))) as pool:
+            futures = [pool.submit(fetch_one, d) for d in candidates]
+            for future in as_completed(futures):
+                try:
+                    url, page_text = future.result()
+                except Exception:
+                    continue
+                for document in found:
+                    if document["url"] == url and page_text:
+                        document["text"] = page_text
+                        document["page_retrieved"] = True
+                        document["research_status"] = "page_retrieved"
+                        break
+
+        return [d for d in found if d.get("text")]
 
     def normalize(self, documents: list[dict]) -> list[Source]:
         return [
@@ -118,40 +148,35 @@ class ResearchService:
     def _build_queries(claim: str) -> list[str]:
         clean = re.sub(r"\s+", " ", claim).strip()
         lower = clean.lower()
-        queries = [clean, f'"{clean}"']
+        # Keep the query set small: one exact/general search + one domain-aware
+        # search. More queries add latency without proportional evidence gain.
         if any(x in lower for x in (
-            "congress", "bjp", "aap", "party", "ruling",
-            "government", "minister", "prime minister", "president",
+            "congress", "bjp", "aap", "party", "ruling", "government",
+            "minister", "prime minister", "president", "election",
         )):
-            queries += [
-                f"{clean} India Union government",
-                f"{clean} central government",
-                f"{clean} Lok Sabha",
-                f"{clean} official",
+            return [
+                clean,
+                f"{clean} India Union government official",
+                f"{clean} Lok Sabha current government",
             ]
-        else:
-            queries += [f"{clean} facts", f"{clean} official"]
-        return list(dict.fromkeys(queries))
+        return [clean, f"{clean} official", f"{clean} facts"]
 
     def _search_once(self, client: httpx.Client, query: str) -> list[dict]:
-        # Try both DDG endpoints. Their HTML structures differ, so parse both.
         for endpoint in self.SEARCH_URLS:
             try:
                 response = client.get(endpoint, params={"q": query})
                 response.raise_for_status()
-            except httpx.HTTPError:
+                results = self._parse_search_html(response.text)
+                if results:
+                    return results
+            except (httpx.HTTPError, UnicodeError):
                 continue
-
-            results = self._parse_search_html(response.text)
-            if results:
-                return results
         return []
 
     def _parse_search_html(self, html: str) -> list[dict]:
         soup = BeautifulSoup(html, "html.parser")
         results: list[dict] = []
 
-        # Standard DuckDuckGo HTML endpoint.
         for result in soup.select(".result"):
             link = result.select_one("a.result__a")
             if not link:
@@ -165,35 +190,26 @@ class ResearchService:
                 "url": url,
                 "snippet": snippet_node.get_text(" ", strip=True) if snippet_node else "",
             })
-
         if results:
-            return results
+            return results[: self.MAX_RESULTS]
 
-        # DuckDuckGo Lite fallback.
         for link in soup.select("a.result-link, a.result__a"):
             url = self._clean_url(link.get("href", ""))
-            if not url:
-                continue
             title = link.get_text(" ", strip=True)
-            parent = link.parent
-            snippet = ""
-            if parent:
-                candidate = parent.find_next(string=lambda s: s and len(s.strip()) > 30)
-                if candidate:
-                    snippet = candidate.strip()
-            results.append({"title": title, "url": url, "snippet": snippet})
+            if url and title:
+                results.append({"title": title, "url": url, "snippet": ""})
+        if results:
+            return results[: self.MAX_RESULTS]
 
-        # Generic fallback for links if DDG changes its classes.
-        if not results:
-            for link in soup.find_all("a", href=True):
-                url = self._clean_url(link.get("href", ""))
-                title = link.get_text(" ", strip=True)
-                if url and title and len(title) > 5:
-                    results.append({"title": title, "url": url, "snippet": ""})
-                if len(results) >= self.MAX_RESULTS:
-                    break
-
-        return results[: self.MAX_RESULTS]
+        # Last-resort generic parser for minor DDG HTML changes.
+        for link in soup.find_all("a", href=True):
+            url = self._clean_url(link.get("href", ""))
+            title = link.get_text(" ", strip=True)
+            if url and title and len(title) > 5:
+                results.append({"title": title, "url": url, "snippet": ""})
+            if len(results) >= self.MAX_RESULTS:
+                break
+        return results
 
     @staticmethod
     def _clean_url(raw: str) -> str:
@@ -211,13 +227,9 @@ class ResearchService:
             if "text/html" not in response.headers.get("content-type", ""):
                 return ""
             soup = BeautifulSoup(response.text, "html.parser")
-            for tag in soup([
-                "script", "style", "noscript", "svg", "nav", "footer", "form"
-            ]):
+            for tag in soup(["script", "style", "noscript", "svg", "nav", "footer", "form"]):
                 tag.decompose()
-            return re.sub(
-                r"\s+", " ", soup.get_text(" ", strip=True)
-            )[: self.MAX_PAGE_CHARS]
+            return re.sub(r"\s+", " ", soup.get_text(" ", strip=True))[: self.MAX_PAGE_CHARS]
         except (httpx.HTTPError, UnicodeError):
             return ""
 

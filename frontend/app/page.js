@@ -46,16 +46,24 @@ export default function Home() {
     setTab("verdict");
 
     try {
-      const response = await fetch(`${API}/api/investigate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: claim }),
-      });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30000);
+      let response;
+      try {
+        response = await fetch(`${API}/api/investigate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: claim }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Investigation failed.");
       setResult(data);
     } catch (error) {
-      setResult({ error: error.message || "Could not connect to Factygo API." });
+      setResult({ error: error.name === "AbortError" ? "Research timed out. The web search provider may be unavailable right now." : (error.message || "Could not connect to Factygo API.") });
     } finally {
       setLoading(false);
     }
@@ -105,7 +113,7 @@ export default function Home() {
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter") investigate();
           }}
           placeholder="e.g. Is Congress the central government in India in 2026?"
-          rows={4}
+          rows={2}
           disabled={loading}
         />
         <div className="searchFooter">
