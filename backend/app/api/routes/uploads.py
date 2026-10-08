@@ -1,23 +1,25 @@
 from fastapi import APIRouter, UploadFile, File
+from app.services.ocr_service import OCRService
+from app.services.document_service import DocumentService
 
 router = APIRouter(prefix="/uploads", tags=["multimodal"])
 
 
 @router.post("/image")
 async def upload_image(file: UploadFile = File(...)):
-    # OCR integration will be added in the multimodal phase.
+    # Connect Tesseract in the next multimodal milestone.
     return {
         "filename": file.filename,
         "status": "received",
-        "next_step": "OCR pipeline",
+        "capability": "OCR",
     }
 
 
 @router.post("/document")
 async def upload_document(file: UploadFile = File(...)):
-    # PDF/DOCX extraction will be added in the document phase.
+    # Connect PDF/DOCX extraction in the next document milestone.
     return {
         "filename": file.filename,
         "status": "received",
-        "next_step": "document extraction pipeline",
+        "capability": "document-analysis",
     }

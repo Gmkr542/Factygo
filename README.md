@@ -1,55 +1,53 @@
 # Factygo
 
-**Evidence-first AI investigation platform**
+## Evidence-first AI investigation platform
 
-Factygo investigates claims instead of simply generating an answer.
+Factygo turns claims, social posts and documents into structured investigations.
 
-## Planned workflow
+### Core pipeline
+Input → Claim extraction → Claim decomposition → Research → Source ranking → Evidence extraction → Contradiction analysis → Verdict → Confidence → Report
 
-Claim/Post/URL/Image/PDF
-→ Claim extraction
-→ Claim decomposition
-→ Web research
-→ Source ranking
-→ Evidence extraction
-→ Supporting/contradicting evidence
-→ Contradiction analysis
-→ Verdict
-→ Confidence
-→ Citation-backed investigation report
+### Target capabilities
+- Text/social claim investigation
+- Compound claim decomposition
+- Web research provider abstraction
+- Source normalization and scoring
+- Supporting/contradicting/context evidence
+- Evidence-first verdicts
+- Confidence + uncertainty
+- Citation mapping
+- OCR/document ingestion hooks
+- PostgreSQL persistence
+- RAG/vector-search extension point
+- AI provider abstraction
+- Authentication-ready architecture
+- Rate limiting hooks
+- Structured logging
+- Background-job architecture
+- Tests
+- Docker
+- GitHub Actions
+- Render deployment
 
-## Current repository
+### Current MVP behavior
+The repository is safe by default: if research evidence is unavailable, Factygo returns `UNVERIFIED`. It never invents sources.
 
-This starter contains:
-- FastAPI backend
-- Next.js frontend
-- Structured investigation API
-- Claim decomposition module
-- Research/evidence/verdict service interfaces
-- OCR/document extension points
-- PostgreSQL-ready configuration
-- Render configuration
-- GitHub Actions tests
-- Docker configuration
-- API documentation through FastAPI `/docs`
+### Free-cost development
+The architecture is provider-independent. You can use local Ollama/open-source models and local PostgreSQL/vector search during development, avoiding paid AI APIs.
 
-The current implementation intentionally returns `UNVERIFIED` until real research/LLM providers are connected. This prevents fabricated evidence.
-
-## Run backend
+## Backend
 
 ```bash
 cd backend
 python -m venv venv
-# Windows:
-venv\Scripts\activate
+# Windows: venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-Backend: http://127.0.0.1:8000
-Docs: http://127.0.0.1:8000/docs
+API docs: http://127.0.0.1:8000/docs
 
-## Run frontend
+## Frontend
 
 ```bash
 cd frontend
@@ -57,40 +55,11 @@ npm install
 npm run dev
 ```
 
-Frontend: http://localhost:3000
+## Environment
 
-Set `NEXT_PUBLIC_API_URL` if the backend is not on localhost.
+Copy `.env.example` to `.env`.
+
+Never commit real secrets.
 
 ## Render
-
-The backend can be deployed using `render.yaml`.
-
-Recommended production environment variables:
-- `DATABASE_URL`
-- `LLM_API_KEY` (when an LLM provider is added)
-- `SEARCH_API_KEY` (when a search provider is added)
-- `CORS_ORIGINS`
-
-Never commit API keys.
-
-## Roadmap
-
-V1 Web research
-V2 Source extraction/ranking
-V3 AI evidence comparison
-V4 Claim decomposition
-V5 Investigation reports
-V6 OCR + screenshots
-V7 PDF/DOCX investigation
-V8 PostgreSQL history
-V9 RAG/semantic retrieval
-V10 Research agent
-V11 Evaluation/quality metrics
-V12 Production security, caching, async workers and monitoring
-
-## Render deployment
-
-The repository is pinned to Python 3.12.10 for backend deployment.
-The Next.js frontend uses static export and publishes `frontend/out`.
-
-See `docs/DEPLOYMENT.md` for the three-service setup.
+See `docs/DEPLOYMENT.md`.

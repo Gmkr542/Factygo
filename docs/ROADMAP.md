@@ -1,65 +1,61 @@
-# Factygo Roadmap
+# Factygo 8–9/10 Roadmap
 
-## V0 Foundation
-- [x] FastAPI
-- [x] Next.js
-- [x] Structured investigation API
-- [x] Claim decomposition skeleton
-- [x] Research abstraction
-- [x] Evidence abstraction
-- [x] Verdict abstraction
-- [x] OCR/document hooks
-- [x] Render configuration
-- [x] Tests
+## Stage 1 — Research
+- Search adapter
+- URL fetcher
+- HTML extraction
+- Source deduplication
+- Domain/source quality scoring
 
-## V1 Research
-- [ ] Search provider
-- [ ] Web result normalization
-- [ ] URL retrieval
-- [ ] Source deduplication
-- [ ] Source quality ranking
+## Stage 2 — Evidence
+- Relevant passage extraction
+- Claim/evidence matching
+- Supporting/contradicting/context labels
+- Citation IDs
+- Contradiction detection
 
-## V2 Verification
-- [ ] LLM claim classification
-- [ ] Evidence extraction
-- [ ] Supporting/contradicting evidence
-- [ ] Contradiction detection
-- [ ] Citation mapping
-- [ ] Confidence calibration
+## Stage 3 — AI
+- Local Ollama adapter
+- Claim classifier
+- Compound claim decomposition
+- Structured LLM output
+- Confidence calibration
 
-## V3 Investigation reports
-- [ ] Claim decomposition UI
-- [ ] Evidence timeline
-- [ ] Investigation report
-- [ ] Export/share
+## Stage 4 — RAG
+- Chunking
+- Embeddings
+- FAISS or pgvector
+- Semantic evidence retrieval
+- Citation grounding
 
-## V4 Multimodal
-- [ ] Screenshot OCR
-- [ ] Image claims
-- [ ] PDF extraction
-- [ ] DOCX extraction
+## Stage 5 — Multimodal
+- Tesseract OCR
+- Screenshot extraction
+- PDF/DOCX extraction
+- Image claim analysis
 
-## V5 Platform
-- [ ] PostgreSQL persistence
-- [ ] Accounts
-- [ ] Investigation history
-- [ ] Saved collections
-- [ ] API keys
+## Stage 6 — Platform
+- PostgreSQL models
+- Users/authentication
+- Investigation history
+- Saved reports
+- Share/export
 
-## V6 AI research agent
-- [ ] Planner
-- [ ] Search tool
-- [ ] Source analysis tool
-- [ ] Evidence tool
-- [ ] Report tool
-- [ ] Human approval checkpoints
+## Stage 7 — Agent
+- Research planner
+- Search tool
+- Evidence tool
+- Source critic
+- Report generator
+- Human approval checkpoints
 
-## V7 Production
-- [ ] Redis
-- [ ] Background workers
-- [ ] Rate limiting
-- [ ] Structured logging
-- [ ] Metrics
-- [ ] CI/CD
-- [ ] Security testing
-- [ ] Evaluation dataset
+## Stage 8 — Production
+- Redis
+- Background workers
+- Distributed rate limiting
+- Caching
+- Structured logging
+- Metrics
+- Evaluation dataset
+- Security testing
+- CI/CD

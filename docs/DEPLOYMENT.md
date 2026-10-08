@@ -1,35 +1,43 @@
-# Factygo Deployment
+# Render Deployment
 
-## Render services
+## factygo-web
+Type: Static Site
+Root: `frontend`
+Build: `npm install && npm run build`
+Publish: `out`
+Environment:
+`NEXT_PUBLIC_API_URL=https://factygo-api.onrender.com`
 
-### factygo-web
-- Type: Static Site
-- Root Directory: `frontend`
-- Build: `npm install && npm run build`
-- Publish Directory: `out`
-- Environment: `NEXT_PUBLIC_API_URL=https://factygo-api.onrender.com`
+## factygo-api
+Type: Web Service
+Root: `backend`
+Build: `pip install -r requirements.txt`
+Start:
+`uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 
-### factygo-api
-- Type: Web Service
-- Root Directory: `backend`
-- Build: `pip install -r requirements.txt`
-- Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Environment:
-  - `DATABASE_URL=<Render PostgreSQL URL>`
-  - `CORS_ORIGINS=https://factygo-web.onrender.com`
+Environment:
+- DATABASE_URL
+- CORS_ORIGINS
+- LLM_PROVIDER
+- LLM_BASE_URL
+- LLM_MODEL
+- SEARCH_PROVIDER
+- SEARCH_API_KEY
+- RATE_LIMIT_PER_MINUTE
 
-### factygo-db
-- Type: PostgreSQL
-- Keep it in the same region as the API.
+### Python runtime
+Because the API service uses `Root Directory: backend`, Python runtime files are also present inside `backend/`:
+- `backend/.python-version` → `3.12.10`
+- `backend/runtime.txt` → `python-3.12.10`
 
-## Python runtime
+The repository root also contains the same pins for local/repo tooling.
 
-The repository pins Python 3.12.10 using both:
-- `.python-version`
-- `runtime.txt`
+After pushing, Render should show:
+`Using Python version 3.12.10`
 
-This avoids Render selecting Python 3.14 for the current dependency set.
+If it still selects 3.14, check the Render service's Environment/Runtime settings for a manually configured Python version and set it to 3.12.10.
 
-## Important
+## PostgreSQL
+Create a Render PostgreSQL database and put its internal connection URL into `DATABASE_URL`.
 
-Never commit real API keys or database passwords.
+Do not commit secrets.

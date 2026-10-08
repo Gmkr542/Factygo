@@ -1,47 +1,41 @@
 # Factygo Architecture
 
-## Core pipeline
+## Evidence-first pipeline
 
 Input
 → claim extraction
 → claim decomposition
 → research
-→ source ranking
+→ source normalization/ranking
 → evidence extraction
-→ stance classification
+→ supporting/contradicting/context classification
 → contradiction analysis
 → verdict
 → confidence
-→ report
+→ citation-backed report
 
-## Design principle
+## Engineering principles
 
-**Evidence before verdict.**
+1. Evidence before verdict.
+2. No fabricated sources.
+3. Provider abstraction.
+4. Small replaceable services.
+5. Database persistence separated from API.
+6. Expensive work can move to background workers.
+7. Local/free AI is supported.
+8. Every AI result should be evaluated.
 
-If the system has no evidence, it must return `UNVERIFIED` rather than hallucinating a conclusion.
+## Target architecture
 
-## Future modules
+Next.js
+→ FastAPI
+→ PostgreSQL
 
-### Research
-Search engines, direct URL fetching, source normalization and ranking.
+FastAPI
+→ Research providers
+→ AI provider
+→ Vector retrieval
+→ Background jobs
 
-### Evidence
-Relevant passage extraction and source-to-claim mapping.
-
-### AI
-LLM-based claim classification, decomposition and reasoning.
-
-### Multimodal
-Tesseract OCR, PDF/DOCX extraction and image analysis.
-
-### Storage
-PostgreSQL for users, investigations, claims, sources, evidence and history.
-
-### Retrieval
-Embeddings + vector search for semantic evidence retrieval.
-
-### Agents
-Planner, researcher, evidence analyst and report generator.
-
-### Production
-Authentication, authorization, rate limiting, caching, async workers, logging, monitoring and evaluation.
+Later:
+Redis → Worker → Research/OCR/RAG

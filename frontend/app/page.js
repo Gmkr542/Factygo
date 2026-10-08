@@ -13,76 +13,80 @@ export default function Home() {
     if (!text.trim()) return;
     setLoading(true);
     setResult(null);
-
     try {
       const response = await fetch(`${API}/api/investigate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({text}),
       });
       const data = await response.json();
       setResult(data);
-    } catch (error) {
-      setResult({ error: "Could not connect to Factygo API." });
+    } catch {
+      setResult({error: "Could not connect to Factygo API."});
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main style={{ maxWidth: 900, margin: "50px auto", padding: 24 }}>
-      <h1>Factygo</h1>
-      <p>Evidence-first AI investigation</p>
+    <main style={{maxWidth: 1000, margin: "0 auto", padding: "50px 24px"}}>
+      <div style={{marginBottom: 35}}>
+        <h1 style={{fontSize: 42, marginBottom: 8}}>Factygo</h1>
+        <p style={{fontSize: 18}}>Evidence-first AI investigation</p>
+      </div>
 
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Paste a claim or social-media post..."
-        rows={7}
-        style={{ width: "100%", padding: 14, boxSizing: "border-box" }}
-      />
+      <section style={{background: "white", padding: 24, borderRadius: 14}}>
+        <h2>Investigate a claim</h2>
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          placeholder="Paste a claim, post, or statement..."
+          rows={7}
+          style={{width:"100%", padding:14, boxSizing:"border-box", borderRadius:8}}
+        />
+        <button
+          onClick={investigate}
+          disabled={loading}
+          style={{marginTop:14, padding:"12px 22px", borderRadius:8}}
+        >
+          {loading ? "Investigating..." : "Investigate"}
+        </button>
+      </section>
 
-      <button
-        onClick={investigate}
-        disabled={loading}
-        style={{ marginTop: 14, padding: "12px 20px", cursor: "pointer" }}
-      >
-        {loading ? "Investigating..." : "Investigate"}
-      </button>
+      {result && !result.error && (
+        <section style={{marginTop:24, background:"white", padding:24, borderRadius:14}}>
+          <h2>{result.verdict}</h2>
+          <p><b>Confidence:</b> {result.confidence}%</p>
+          <p>{result.explanation}</p>
 
-      {result && (
-        <section style={{ marginTop: 30 }}>
-          {result.error ? (
-            <p>{result.error}</p>
-          ) : (
-            <>
-              <h2>{result.verdict}</h2>
-              <p><b>Confidence:</b> {result.confidence}%</p>
-              <p>{result.explanation}</p>
+          <h3>Claim breakdown</h3>
+          <ol>
+            {result.claims?.map(c => <li key={c.id}>{c.text}</li>)}
+          </ol>
 
-              <h3>Claim breakdown</h3>
-              <ul>
-                {result.claims?.map((claim) => (
-                  <li key={claim.id}>{claim.text}</li>
-                ))}
-              </ul>
+          <h3>Sources</h3>
+          {result.sources?.length ? (
+            result.sources.map((s, i) => (
+              <p key={i}><a href={s.url} target="_blank">{s.title}</a></p>
+            ))
+          ) : <p>No sources retrieved yet.</p>}
 
-              <h3>Evidence</h3>
-              {result.evidence?.length ? (
-                result.evidence.map((item, i) => (
-                  <article key={i}>
-                    <b>{item.title}</b>
-                    <p>{item.excerpt}</p>
-                    <a href={item.url} target="_blank">Source</a>
-                  </article>
-                ))
-              ) : (
-                <p>No evidence retrieved yet. Factygo will not invent sources.</p>
-              )}
-            </>
-          )}
+          <h3>Evidence</h3>
+          {result.evidence?.length ? (
+            result.evidence.map((e, i) => (
+              <article key={i}>
+                <b>{e.stance}</b>
+                <p>{e.excerpt}</p>
+              </article>
+            ))
+          ) : <p>Factygo will not invent evidence.</p>}
+
+          <h3>Methodology</h3>
+          <ul>{result.methodology?.map((m, i) => <li key={i}>{m}</li>)}</ul>
         </section>
       )}
+
+      {result?.error && <p style={{marginTop:20}}>{result.error}</p>}
     </main>
   );
 }

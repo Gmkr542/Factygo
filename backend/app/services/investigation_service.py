@@ -1,7 +1,4 @@
-from app.schemas.investigation import (
-    InvestigationResponse,
-    Claim,
-)
+from app.schemas.investigation import InvestigationResponse
 from app.services.claim_service import decompose_claim
 from app.services.research_service import ResearchService
 from app.services.evidence_service import EvidenceService
@@ -15,7 +12,6 @@ def investigate(text: str) -> InvestigationResponse:
     evidence_service = EvidenceService()
     verdict_service = VerdictService()
 
-    # Safe MVP: no evidence is invented.
     documents = researcher.search(text)
     evidence = evidence_service.extract(documents, text)
     verdict = verdict_service.evaluate(text, evidence)
@@ -27,5 +23,11 @@ def investigate(text: str) -> InvestigationResponse:
         confidence=verdict["confidence"],
         explanation=verdict["explanation"],
         evidence=evidence,
+        sources=researcher.normalize(documents),
         status="research_not_configured" if not documents else "complete",
+        methodology=[
+            "Claim decomposition",
+            "Evidence-first verification",
+            "No verdict without evidence",
+        ],
     )

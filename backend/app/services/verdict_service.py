@@ -1,7 +1,9 @@
 class VerdictService:
-    """Evidence-based verdict engine.
+    """Transparent verdict engine.
 
-    It deliberately refuses to guess when evidence is unavailable.
+    Supported final labels:
+    TRUE, MOSTLY_TRUE, PARTLY_TRUE, MISLEADING,
+    MOSTLY_FALSE, FALSE, UNVERIFIED, INSUFFICIENT_EVIDENCE
     """
 
     def evaluate(self, claim: str, evidence: list[dict]) -> dict:
@@ -10,13 +12,13 @@ class VerdictService:
                 "verdict": "UNVERIFIED",
                 "confidence": 0,
                 "explanation": (
-                    "Factygo does not have retrieved evidence yet. "
-                    "No verdict is generated without evidence."
+                    "No retrieved evidence is available. Factygo refuses "
+                    "to invent a verdict or source."
                 ),
             }
 
         return {
             "verdict": "UNVERIFIED",
             "confidence": 0,
-            "explanation": "Evidence evaluation is not configured yet.",
+            "explanation": "Evidence evaluation is not configured.",
         }
