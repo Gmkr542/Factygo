@@ -1,9 +1,9 @@
 class VerdictService:
-    """Transparent verdict engine.
+    """Conservative verdict layer.
 
-    Supported final labels:
-    TRUE, MOSTLY_TRUE, PARTLY_TRUE, MISLEADING,
-    MOSTLY_FALSE, FALSE, UNVERIFIED, INSUFFICIENT_EVIDENCE
+    Research/evidence v1 is intentionally not allowed to turn keyword overlap
+    into a factual verdict. A later semantic/LLM evaluator can consume the
+    evidence and produce a supported label with calibrated confidence.
     """
 
     def evaluate(self, claim: str, evidence: list[dict]) -> dict:
@@ -11,14 +11,15 @@ class VerdictService:
             return {
                 "verdict": "UNVERIFIED",
                 "confidence": 0,
-                "explanation": (
-                    "No retrieved evidence is available. Factygo refuses "
-                    "to invent a verdict or source."
-                ),
+                "explanation": "No retrieved evidence is available. Factygo refuses to invent a verdict or source.",
             }
 
         return {
-            "verdict": "UNVERIFIED",
-            "confidence": 0,
-            "explanation": "Evidence evaluation is not configured.",
+            "verdict": "INSUFFICIENT_EVIDENCE",
+            "confidence": 20,
+            "explanation": (
+                f"Factygo retrieved {len(evidence)} claim-relevant excerpts, but the current "
+                "verdict engine does not convert keyword evidence into a factual conclusion. "
+                "A semantic evidence evaluator is required before issuing TRUE/FALSE labels."
+            ),
         }
