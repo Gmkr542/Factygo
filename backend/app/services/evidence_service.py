@@ -56,6 +56,10 @@ class EvidenceService:
         lower = sentence.lower()
         relevance = cls._relevance(sentence, cls._terms(claim))
         jurisdiction_match = cls._scope_match(lower, meta)
+        if meta["jurisdiction"] == "UNION" and doc.get("source_type") in {"official_government", "official_parliament"}:
+            domain = urlparse(doc.get("url", "")).netloc.lower().removeprefix("www.")
+            if domain in {"pmindia.gov.in", "sansad.in", "loksabha.nic.in"}:
+                jurisdiction_match = True
         temporal_match = cls._time_match(lower, meta.get("year"))
         stance = "contextual"
         reason = "Relevant passage, but it does not directly establish the claim."
@@ -72,10 +76,30 @@ class EvidenceService:
                 "formed the government at the centre", "formed the government at the center", "formed the union government",
                 "congress-led union government", "congress government at the centre", "congress government at the center",
             ))
-            if direct_negative and jurisdiction_match:
+            authority_negative = any(p in lower for p in (
+                "prime minister narendra modi",
+                "prime minister of india: narendra modi",
+                "narendra modi is the prime minister",
+                "narendra modi, prime minister",
+            ))
+            authority_positive = any(p in lower for p in (
+                "prime minister rahul gandhi",
+                "congress-led government",
+                "indian national congress-led government",
+            ))
+            subject_absent_lead = any(p in lower for p in (
+                "bjp-led", "nda-led", "bjp led", "national democratic alliance",
+            )) and "congress" not in lower
+            if subject_absent_lead and jurisdiction_match:
+                stance, reason = "contradicting", "The authoritative passage identifies another party or coalition as leading the Union Government."
+            elif direct_negative and jurisdiction_match:
                 stance, reason = "contradicting", "Direct Union-government evidence contradicts the claim."
-            elif direct_positive and jurisdiction_match:
-                stance, reason = "supporting", "Direct Union-government evidence supports the claim."
+            elif direct_positive and jurisdiction_match and "congress" in lower:
+                stance, reason = "supporting", "Direct Union-government evidence supports the claim's subject."
+            elif authority_negative and jurisdiction_match:
+                stance, reason = "contradicting", "An authoritative government record identifies a different current Union executive than the claim's subject."
+            elif authority_positive and jurisdiction_match:
+                stance, reason = "supporting", "An authoritative record directly identifies the claim's subject as leading the Union government."
         if stance == "contextual":
             if any(p in lower for p in ("not ", "did not", "never", "false", "denied", "rejected", "opposition")) and jurisdiction_match:
                 stance = "contradicting"; reason = "The passage contains a direct contradiction cue and matches the claim scope."

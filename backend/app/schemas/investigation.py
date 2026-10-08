@@ -35,6 +35,15 @@ class Evidence(BaseModel):
     reason: str = ""
 
 
+class ResearchQuestion(BaseModel):
+    id: int
+    question: str
+    raw_answer: str = ""
+    sources: List[Source] = []
+    evidence_count: int = 0
+    status: str = "no_results"
+
+
 class InvestigationResponse(BaseModel):
     claim: str
     claims: List[Claim]
@@ -47,3 +56,4 @@ class InvestigationResponse(BaseModel):
     methodology: List[str] = []
     claim_analysis: dict = {}
     evidence_analysis: dict = {}
+    research_questions: List[ResearchQuestion] = []

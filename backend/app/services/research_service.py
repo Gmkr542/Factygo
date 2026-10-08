@@ -22,10 +22,10 @@ class ResearchService:
         "https://html.duckduckgo.com/html/",
         "https://lite.duckduckgo.com/lite/",
     )
-    SEARCH_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
-    PAGE_TIMEOUT = httpx.Timeout(3.5, connect=2.0)
+    SEARCH_TIMEOUT = httpx.Timeout(8.0, connect=4.0)
+    PAGE_TIMEOUT = httpx.Timeout(8.0, connect=4.0)
     MAX_RESULTS = 10
-    MAX_PAGE_FETCHES = 5
+    MAX_PAGE_FETCHES = 8
     MAX_PAGE_CHARS = 16000
 
     OFFICIAL_DOMAINS = {
@@ -98,12 +98,36 @@ class ResearchService:
                 if len(found) >= self.MAX_RESULTS:
                     break
 
+        # Search is discovery, not a prerequisite for authoritative research.
+        # For high-priority political/current-government claims, add direct
+        # primary-source seeds even when a search provider is unavailable.
+        for seed in self._authority_seeds(query):
+            url = seed["url"]
+            if url in seen:
+                continue
+            seen.add(url)
+            source_type, score = self._source_profile(url)
+            found.append({
+                "title": seed["title"],
+                "url": url,
+                "snippet": "",
+                "source_score": score,
+                "source_type": source_type,
+                "text": "",
+                "page_retrieved": False,
+                "research_status": "authority_seed",
+            })
+
         if not found:
             return []
 
-        # Enrich only the top few pages. Snippet-only results are retained as
-        # discovery metadata but are excluded from the returned evidence corpus.
-        candidates = found[: self.MAX_PAGE_FETCHES]
+        # Enrich the best discovery results plus direct authority seeds.
+        # Snippet-only results never enter the evidence corpus.
+        candidates = sorted(
+            found,
+            key=lambda d: (d.get("research_status") == "authority_seed", d.get("source_score", 0)),
+            reverse=True,
+        )[: self.MAX_PAGE_FETCHES]
 
         def fetch_one(document: dict) -> tuple[str, str]:
             try:
@@ -144,6 +168,31 @@ class ResearchService:
                 source_tier=self._tier(float(doc.get("source_score", 0))),
             )
             for doc in documents
+        ]
+
+    @classmethod
+    def _authority_seeds(cls, claim: str) -> list[dict]:
+        lower = claim.lower()
+        political = any(x in lower for x in (
+            "congress", "bjp", "aap", "ruling", "central government",
+            "union government", "prime minister", "government of india",
+            "lok sabha", "election", "in power", "governing",
+        ))
+        if not political:
+            return []
+        return [
+            {
+                "title": "Prime Minister of India — Prime Minister's Office",
+                "url": "https://www.pmindia.gov.in/en/prime-minister-of-india/",
+            },
+            {
+                "title": "Election Commission of India — 2024 Lok Sabha Results",
+                "url": "https://results.eci.gov.in/PcResultGenJune2024/",
+            },
+            {
+                "title": "Parliament of India — Sansad",
+                "url": "https://sansad.in/",
+            },
         ]
 
     @staticmethod

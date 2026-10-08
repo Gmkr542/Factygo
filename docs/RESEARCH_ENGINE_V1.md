@@ -18,3 +18,11 @@ Replace the conservative verdict layer with semantic evidence evaluation + sourc
 
 ## Input policy
 Attachments are optional. Text-only investigation is a first-class flow; image/PDF/DOCX uploads are separate optional capabilities. The investigation API must not require a document attachment.
+
+## V8 Question-Decomposition Pipeline
+
+The investigation flow is now:
+
+`Original input -> framed questions -> independent research per question -> raw source-grounded answers -> combined evidence -> validation/cross-check -> final synthesis for the original input.`
+
+Framed questions are research tasks, not independent verdicts. Search snippets remain discovery-only; retrieved source-page content is the evidence corpus. The final verdict is evaluated against the original investigation input after all question research is combined.

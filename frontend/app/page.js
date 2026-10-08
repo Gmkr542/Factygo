@@ -10,6 +10,7 @@ const tabs = [
   ["sources", "Sources"],
   ["claim", "Claim"],
   ["analysis", "Analysis"],
+  ["research", "Research"],
 ];
 
 function label(value) {
@@ -289,6 +290,27 @@ export default function Home() {
                 )}
                 <h4>Claim breakdown</h4>
                 {result.claims?.length ? <ol className="claims">{result.claims.map(c => <li key={c.id}>{c.text}</li>)}</ol> : <p className="muted">No additional decomposition returned.</p>}
+              </div>
+            )}
+
+            {tab === "research" && (
+              <div className="panelContent">
+                <span className="sectionKicker">RESEARCH PLAN</span>
+                <h3>Framed questions</h3>
+                <p className="lead">Each question is researched independently. These raw answers are evidence inputs for the final synthesis, not separate verdicts.</p>
+                <div className="evidenceList">
+                  {(result.research_questions || []).map((q) => (
+                    <article className="evidenceCard" key={q.id}>
+                      <div className="cardTop">
+                        <span className="stance contextual">Q{q.id}</span>
+                        <div className="metricPills"><span>{q.evidence_count} source{q.evidence_count === 1 ? "" : "s"}</span><span>{label(q.status)}</span></div>
+                      </div>
+                      <h4>{q.question}</h4>
+                      <p className="quote">{q.raw_answer || "No raw answer returned."}</p>
+                      {q.sources?.length > 0 && <div className="sourceList">{q.sources.map((source) => <a className="sourceLink" key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title || source.domain} ↗</a>)}</div>}
+                    </article>
+                  ))}
+                </div>
               </div>
             )}
 
