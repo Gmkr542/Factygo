@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 from typing import List, Optional
 
 
@@ -18,6 +18,7 @@ class Source(BaseModel):
     domain: str = ""
     source_score: float = 0
     source_type: str = "unknown"
+    source_tier: int = 5
 
 
 class Evidence(BaseModel):
@@ -27,6 +28,11 @@ class Evidence(BaseModel):
     stance: str
     relevance: float = 0
     source_score: float = 0
+    source_type: str = "unknown"
+    source_tier: int = 5
+    domain: str = ""
+    strength: float = 0
+    rationale: str = ""
 
 
 class InvestigationResponse(BaseModel):
@@ -39,3 +45,4 @@ class InvestigationResponse(BaseModel):
     sources: List[Source] = []
     status: str
     methodology: List[str] = []
+    analysis: dict = {}

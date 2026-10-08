@@ -30,7 +30,9 @@ Input → Claim extraction → Claim decomposition → Research → Source ranki
 - Render deployment
 
 ### Current MVP behavior
-The repository is safe by default: if research evidence is unavailable, Factygo returns `UNVERIFIED`. It never invents sources.
+The research engine uses free web discovery plus direct page retrieval. Evidence is scored for relevance and stance, sources are ranked by quality tier, independent domains are counted for corroboration, and the verdict engine produces an evidence-weighted label. If no research evidence is available, Factygo returns `UNVERIFIED`. It never invents sources.
+
+See `docs/EVIDENCE_INTELLIGENCE_V2.md` for the current evidence/verdict design.
 
 ### Free-cost development
 The architecture is provider-independent. You can use local Ollama/open-source models and local PostgreSQL/vector search during development, avoiding paid AI APIs.

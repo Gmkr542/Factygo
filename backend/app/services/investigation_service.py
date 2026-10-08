@@ -7,7 +7,6 @@ from app.services.verdict_service import VerdictService
 
 def investigate(text: str) -> InvestigationResponse:
     claims = decompose_claim(text)
-
     researcher = ResearchService()
     evidence_service = EvidenceService()
     verdict_service = VerdictService()
@@ -27,7 +26,11 @@ def investigate(text: str) -> InvestigationResponse:
         status="complete" if documents else "no_results",
         methodology=[
             "Claim decomposition",
-            "Evidence-first verification",
-            "No verdict without evidence",
+            "Free web research and source ranking",
+            "Evidence relevance and stance analysis",
+            "Independent-source corroboration",
+            "Evidence-weighted verdict with uncertainty",
+            "No verdict without sufficiently relevant evidence",
         ],
+        analysis=verdict.get("analysis", {}),
     )
