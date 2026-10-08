@@ -48,7 +48,7 @@ export default function Home() {
 
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30000);
+      const timer = setTimeout(() => controller.abort(), 45000);
       let response;
       try {
         response = await fetch(`${API}/api/investigate`, {

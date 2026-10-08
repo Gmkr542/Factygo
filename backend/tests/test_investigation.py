@@ -42,3 +42,18 @@ def test_congress_claim_can_be_contradicted_by_authoritative_pm_record():
         }
     ], "is congress central government in India 2026?")
     assert any(item["stance"] == "contradicting" for item in evidence)
+
+def test_generic_pm_statement_is_not_support_for_congress_claim():
+    from app.services.evidence_service import EvidenceService
+    evidence = EvidenceService().extract([
+        {
+            "title": "Prime Minister of India",
+            "url": "https://www.pmindia.gov.in/en/prime-minister-of-india/",
+            "source_score": 1.0,
+            "source_type": "official_government",
+            "text": "Narendra Modi is the Prime Minister of India. The Prime Minister leads the Government of India.",
+            "page_retrieved": True,
+        }
+    ], "Is Congress the central government in India in 2026?")
+    assert any(item["stance"] == "contradicting" for item in evidence)
+    assert not any(item["stance"] == "supporting" for item in evidence)

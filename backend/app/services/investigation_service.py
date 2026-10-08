@@ -103,9 +103,13 @@ def investigate(text: str) -> InvestigationResponse:
             url = doc.get("url", "")
             if url and url not in seen_urls:
                 seen_urls.add(url)
-                documents.append(doc)
+                enriched = dict(doc)
+                enriched["research_question"] = question
+                documents.append(enriched)
             if url and url not in {d.get("url") for d in unique_docs}:
-                unique_docs.append(doc)
+                enriched = dict(doc)
+                enriched["research_question"] = question
+                unique_docs.append(enriched)
         question_models.append(
             ResearchQuestion(
                 id=index,

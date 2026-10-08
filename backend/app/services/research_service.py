@@ -22,10 +22,10 @@ class ResearchService:
         "https://html.duckduckgo.com/html/",
         "https://lite.duckduckgo.com/lite/",
     )
-    SEARCH_TIMEOUT = httpx.Timeout(8.0, connect=4.0)
-    PAGE_TIMEOUT = httpx.Timeout(8.0, connect=4.0)
-    MAX_RESULTS = 10
-    MAX_PAGE_FETCHES = 10
+    SEARCH_TIMEOUT = httpx.Timeout(2.5, connect=1.5)
+    PAGE_TIMEOUT = httpx.Timeout(3.5, connect=2.0)
+    MAX_RESULTS = 6
+    MAX_PAGE_FETCHES = 4
     MAX_PAGE_CHARS = 16000
 
     OFFICIAL_DOMAINS = {
@@ -211,31 +211,22 @@ class ResearchService:
     def _build_queries(claim: str) -> list[str]:
         clean = re.sub(r"\s+", " ", claim).strip()
         lower = clean.lower()
-        # Keep the query set small: one exact/general search + one domain-aware
-        # search. More queries add latency without proportional evidence gain.
+        # Hard latency budget: a small number of parallel discovery queries.
+        # Primary-source seeds below provide the authoritative fallback.
         if any(x in lower for x in (
             "congress", "bjp", "aap", "party", "ruling", "government",
             "minister", "prime minister", "president", "election",
         )):
-            queries = [
-                clean,
-                f"{clean} India Union government official",
-                f"{clean} Lok Sabha current government",
-            ]
-            # Current political-power claims benefit from source-directed
-            # discovery. These are still only discovery queries; page content
-            # must be retrieved before it becomes evidence.
-            if any(x in lower for x in ("congress", "bjp", "ruling", "central government", "union government")):
-                if "prime minister" in lower:
-                    queries.append("current Prime Minister of India 2026 site:pmindia.gov.in")
-                queries.append("2024 Lok Sabha election results site:eci.gov.in")
-                if any(x in lower for x in ("government", "ruling", "in power", "governing", "coalition")):
-                    queries.extend([
-                        "Union Government India current 2026 site:pmindia.gov.in",
-                        "current Union Government India 2026 site:sansad.in",
-                    ])
-            return list(dict.fromkeys(queries))[:6]
-        return [clean, f"{clean} official", f"{clean} facts"]
+            queries = [clean, f"{clean} India Union government official"]
+            if any(x in lower for x in (
+                "congress", "bjp", "ruling", "central government", "union government"
+            )):
+                queries.extend([
+                    "current Prime Minister of India 2026 site:pmindia.gov.in",
+                    "2024 Lok Sabha election results site:eci.gov.in",
+                ])
+            return list(dict.fromkeys(queries))[:4]
+        return [clean, f"{clean} official"]
 
     def _search_once(self, client: httpx.Client, query: str) -> list[dict]:
         for endpoint in self.SEARCH_URLS:
