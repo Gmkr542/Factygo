@@ -24,7 +24,7 @@ def investigate(text: str) -> InvestigationResponse:
         explanation=verdict["explanation"],
         evidence=evidence,
         sources=researcher.normalize(documents),
-        status="research_not_configured" if not documents else "complete",
+        status="complete" if documents else "no_results",
         methodology=[
             "Claim decomposition",
             "Evidence-first verification",

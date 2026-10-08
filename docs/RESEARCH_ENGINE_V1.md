@@ -14,3 +14,7 @@ Claim → DuckDuckGo search → URL normalization → page retrieval → text ex
 
 ## Next upgrade
 Replace the conservative verdict layer with semantic evidence evaluation + source-quality calibration, then add caching/background jobs.
+
+
+## Input policy
+Attachments are optional. Text-only investigation is a first-class flow; image/PDF/DOCX uploads are separate optional capabilities. The investigation API must not require a document attachment.
