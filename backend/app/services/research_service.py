@@ -11,11 +11,11 @@ from app.schemas.investigation import Source
 
 
 class ResearchService:
-    """Fast, resilient free-web research.
+    """Fast, resilient evidence-first web research.
 
-    Search snippets are immediately usable evidence. Destination pages are
-    optional enrichment and are fetched with short timeouts/concurrency so a
-    blocked page cannot stall an investigation.
+    Search results are discovery records only. A destination page must be
+    successfully retrieved before its text can enter the evidence pipeline.
+    This prevents truncated/stale search snippets from being treated as proof.
     """
 
     SEARCH_URLS = (
@@ -88,10 +88,10 @@ class ResearchService:
                         "snippet": item.get("snippet", "")[:1800],
                         "source_score": score,
                         "source_type": source_type,
-                        # Search snippets are valid fallback research material.
-                        "text": item.get("snippet", ""),
+                        # Search snippets are discovery metadata, never evidence.
+                        "text": "",
                         "page_retrieved": False,
-                        "research_status": "search_snippet_only",
+                        "research_status": "search_result_only",
                     })
                     if len(found) >= self.MAX_RESULTS:
                         break
@@ -101,7 +101,8 @@ class ResearchService:
         if not found:
             return []
 
-        # Enrich only the top few pages. Never remove snippet-only results.
+        # Enrich only the top few pages. Snippet-only results are retained as
+        # discovery metadata but are excluded from the returned evidence corpus.
         candidates = found[: self.MAX_PAGE_FETCHES]
 
         def fetch_one(document: dict) -> tuple[str, str]:
@@ -129,7 +130,8 @@ class ResearchService:
                         document["research_status"] = "page_retrieved"
                         break
 
-        return [d for d in found if d.get("text")]
+        # Only successfully retrieved source content is evidence-bearing.
+        return [d for d in found if d.get("page_retrieved") and d.get("text")]
 
     def normalize(self, documents: list[dict]) -> list[Source]:
         return [
@@ -154,11 +156,21 @@ class ResearchService:
             "congress", "bjp", "aap", "party", "ruling", "government",
             "minister", "prime minister", "president", "election",
         )):
-            return [
+            queries = [
                 clean,
                 f"{clean} India Union government official",
                 f"{clean} Lok Sabha current government",
             ]
+            # Current political-power claims benefit from source-directed
+            # discovery. These are still only discovery queries; page content
+            # must be retrieved before it becomes evidence.
+            if any(x in lower for x in ("congress", "bjp", "ruling", "central government", "union government")):
+                queries.extend([
+                    "current Prime Minister of India 2026 site:pmindia.gov.in",
+                    "2024 Lok Sabha election results site:eci.gov.in",
+                    "Union Government India current 2026 site:india.gov.in",
+                ])
+            return list(dict.fromkeys(queries))[:6]
         return [clean, f"{clean} official", f"{clean} facts"]
 
     def _search_once(self, client: httpx.Client, query: str) -> list[dict]:

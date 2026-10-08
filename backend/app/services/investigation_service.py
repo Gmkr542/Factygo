@@ -22,7 +22,7 @@ def investigate(text: str) -> InvestigationResponse:
         methodology=[
             "Claim understanding: subject, jurisdiction and time",
             "Claim-aware web research",
-            "Search snippets retained when page retrieval is blocked",
+            "Search results used for discovery; only retrieved page content enters evidence",
             "Scope and temporal evidence matching",
             "Source authority ranking",
             "Evidence stance and corroboration",

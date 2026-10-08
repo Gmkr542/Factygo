@@ -25,14 +25,16 @@ def test_search_html_parses_lite_result():
     assert results[0]["url"] == "https://example.com/page"
 
 
-def test_snippet_is_usable_when_page_fetch_fails():
-    # Regression contract: search results must not be discarded solely
-    # because the destination page cannot be fetched.
+def test_snippet_is_not_evidence_when_page_fetch_fails():
+    # Evidence-first contract: search snippets are discovery metadata only.
     document = {
         "title": "Example",
         "url": "https://example.com",
         "snippet": "Congress is not the central government of India.",
+        "text": "",
+        "page_retrieved": False,
+        "research_status": "search_result_only",
     }
-    page_text = ""
-    text = page_text or document["snippet"]
-    assert text
+    assert not document["text"]
+    assert document["research_status"] == "search_result_only"
+    assert document["page_retrieved"] is False
