@@ -10,31 +10,23 @@ from app.schemas.investigation import Source
 
 
 class ResearchService:
-    """Free web research adapter using DuckDuckGo HTML + direct page retrieval."""
+    """Free web research adapter using DuckDuckGo HTML + direct page retrieval.
+
+    No paid search API is required. Provider-specific logic stays here so it can
+    later be replaced by another adapter without changing the investigation API.
+    """
 
     SEARCH_URL = "https://html.duckduckgo.com/html/"
     TIMEOUT = httpx.Timeout(12.0, connect=8.0)
-    MAX_RESULTS = 10
+    MAX_RESULTS = 8
     MAX_PAGE_CHARS = 18000
-
-    HIGH_AUTHORITY = {
-        "nasa.gov", "noaa.gov", "usgs.gov", "nih.gov", "cdc.gov", "who.int",
-        "un.org", "worldbank.org", "imf.org", "ec.europa.eu", "supremecourt.gov",
-        "eci.gov.in", "indiacode.nic.in", "pib.gov.in", "isro.gov.in", "rbi.org.in",
-        "mospi.gov.in", "mha.gov.in", "mea.gov.in", "gov.in", "nic.in",
-    }
-    ACADEMIC_DOMAINS = {"edu", "ac.in"}
-    REPUTABLE_NEWS = {
-        "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk", "thehindu.com",
-        "indianexpress.com", "nytimes.com", "washingtonpost.com", "theguardian.com",
-    }
 
     def search(self, query: str) -> list[dict]:
         queries = self._build_queries(query)
         documents: list[dict] = []
         seen: set[str] = set()
-        headers = {"User-Agent": "Factygo/1.1 (+evidence-research)"}
 
+        headers = {"User-Agent": "Factygo/1.0 (+evidence-research)"}
         with httpx.Client(timeout=self.TIMEOUT, follow_redirects=True, headers=headers) as client:
             for search_query in queries:
                 try:
@@ -61,7 +53,6 @@ class ResearchService:
                         "snippet": snippet[:1000],
                         "source_score": self._source_score(url),
                         "source_type": self._source_type(url),
-                        "source_tier": self._source_tier(url),
                     })
                     if len(documents) >= self.MAX_RESULTS:
                         break
@@ -70,10 +61,9 @@ class ResearchService:
 
             for document in documents:
                 page_text = self._fetch_page(client, document["url"])
-                document["text"] = page_text or document.get("snippet", "")
-                document["retrieved"] = bool(document["text"])
+                document["text"] = page_text
+                document["retrieved"] = bool(page_text)
 
-        documents.sort(key=lambda d: (d["source_score"], d.get("retrieved", False)), reverse=True)
         return [d for d in documents if d.get("retrieved")]
 
     def normalize(self, documents: list[dict]) -> list[Source]:
@@ -81,17 +71,16 @@ class ResearchService:
             Source(
                 title=doc.get("title", "Untitled"),
                 url=doc.get("url", ""),
-                domain=urlparse(doc.get("url", "")).netloc.lower().removeprefix("www."),
+                domain=urlparse(doc.get("url", "")).netloc,
                 source_score=float(doc.get("source_score", 0)),
                 source_type=doc.get("source_type", "unknown"),
-                source_tier=int(doc.get("source_tier", 5)),
             )
             for doc in documents
         ]
 
     def _build_queries(self, claim: str) -> list[str]:
         clean = re.sub(r"\s+", " ", claim).strip()
-        return [clean, f"{clean} evidence", f"{clean} official source", f"{clean} scientific research"]
+        return [clean, f"{clean} facts", f"{clean} official"]
 
     @staticmethod
     def _clean_url(raw: str) -> str:
@@ -107,39 +96,29 @@ class ResearchService:
         try:
             response = client.get(url)
             response.raise_for_status()
-            if "text/html" not in response.headers.get("content-type", ""):
+            content_type = response.headers.get("content-type", "")
+            if "text/html" not in content_type:
                 return ""
             soup = BeautifulSoup(response.text, "html.parser")
-            for tag in soup(["script", "style", "noscript", "svg", "nav", "footer", "header"]):
+            for tag in soup(["script", "style", "noscript", "svg", "nav", "footer"]):
                 tag.decompose()
             text = soup.get_text(" ", strip=True)
             return re.sub(r"\s+", " ", text)[: self.MAX_PAGE_CHARS]
         except (httpx.HTTPError, UnicodeError):
             return ""
 
-    @classmethod
-    def _source_type(cls, url: str) -> str:
+    @staticmethod
+    def _source_type(url: str) -> str:
         domain = urlparse(url).netloc.lower().removeprefix("www.")
-        if cls._source_tier(url) == 1:
+        if domain.endswith(".gov") or domain.endswith(".gov.in") or domain.endswith(".nic.in"):
             return "official"
-        if cls._source_tier(url) == 2:
+        if domain.endswith(".edu") or domain.endswith(".ac.in"):
             return "academic"
-        if domain in cls.REPUTABLE_NEWS or any(domain.endswith("." + d) for d in cls.REPUTABLE_NEWS):
+        if any(x in domain for x in ("reuters.com", "apnews.com", "bbc.com", "thehindu.com", "indianexpress.com")):
             return "news"
         return "web"
 
-    @classmethod
-    def _source_tier(cls, url: str) -> int:
-        domain = urlparse(url).netloc.lower().removeprefix("www.")
-        if domain in cls.HIGH_AUTHORITY or any(domain.endswith("." + d) for d in cls.HIGH_AUTHORITY if "." in d):
-            return 1
-        suffix = "." + domain.split(".")[-1] if "." in domain else domain
-        if suffix in {".edu", ".ac.in"} or domain.endswith(".edu") or domain.endswith(".ac.in"):
-            return 2
-        if domain in cls.REPUTABLE_NEWS or any(domain.endswith("." + d) for d in cls.REPUTABLE_NEWS):
-            return 3
-        return 4
-
-    @classmethod
-    def _source_score(cls, url: str) -> float:
-        return {1: 1.0, 2: 0.9, 3: 0.8, 4: 0.5}[cls._source_tier(url)]
+    @staticmethod
+    def _source_score(url: str) -> float:
+        kind = ResearchService._source_type(url)
+        return {"official": 1.0, "academic": 0.9, "news": 0.8, "web": 0.5}.get(kind, 0.3)
