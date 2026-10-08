@@ -25,7 +25,7 @@ class ResearchService:
     SEARCH_TIMEOUT = httpx.Timeout(8.0, connect=4.0)
     PAGE_TIMEOUT = httpx.Timeout(8.0, connect=4.0)
     MAX_RESULTS = 10
-    MAX_PAGE_FETCHES = 8
+    MAX_PAGE_FETCHES = 10
     MAX_PAGE_CHARS = 16000
 
     OFFICIAL_DOMAINS = {
@@ -176,24 +176,36 @@ class ResearchService:
         political = any(x in lower for x in (
             "congress", "bjp", "aap", "ruling", "central government",
             "union government", "prime minister", "government of india",
-            "lok sabha", "election", "in power", "governing",
+            "lok sabha", "election", "in power", "governing", "coalition",
         ))
         if not political:
             return []
-        return [
-            {
-                "title": "Prime Minister of India — Prime Minister's Office",
-                "url": "https://www.pmindia.gov.in/en/prime-minister-of-india/",
-            },
-            {
-                "title": "Election Commission of India — 2024 Lok Sabha Results",
-                "url": "https://results.eci.gov.in/PcResultGenJune2024/",
-            },
-            {
-                "title": "Parliament of India — Sansad",
-                "url": "https://sansad.in/",
-            },
-        ]
+
+        seeds: list[dict] = []
+        def add(title: str, url: str) -> None:
+            if not any(x["url"] == url for x in seeds):
+                seeds.append({"title": title, "url": url})
+
+        # Seed the source that can answer the specific research question.
+        # Search engines are discovery aids; these are deterministic primary
+        # source fallbacks for high-value political questions.
+        if "prime minister" in lower:
+            add("Prime Minister of India — Prime Minister's Office",
+                "https://www.pmindia.gov.in/en/prime-minister-of-india/")
+
+        if any(x in lower for x in ("election", "lok sabha", "results", "coalition", "government", "ruling", "in power", "governing", "congress", "bjp")):
+            add("Election Commission of India — General Election 2024",
+                "https://results.eci.gov.in/PcResultGenJune2024/")
+
+        if any(x in lower for x in ("union government", "central government", "government of india", "ruling", "in power", "governing", "party or coalition")):
+            add("Prime Minister of India — Prime Minister's Office",
+                "https://www.pmindia.gov.in/en/prime-minister-of-india/")
+            add("Parliament of India — Sansad", "https://sansad.in/")
+
+        if "congress" in lower:
+            add("Indian National Congress — Official", "https://inc.in/")
+
+        return seeds
 
     @staticmethod
     def _build_queries(claim: str) -> list[str]:
@@ -214,11 +226,14 @@ class ResearchService:
             # discovery. These are still only discovery queries; page content
             # must be retrieved before it becomes evidence.
             if any(x in lower for x in ("congress", "bjp", "ruling", "central government", "union government")):
-                queries.extend([
-                    "current Prime Minister of India 2026 site:pmindia.gov.in",
-                    "2024 Lok Sabha election results site:eci.gov.in",
-                    "Union Government India current 2026 site:india.gov.in",
-                ])
+                if "prime minister" in lower:
+                    queries.append("current Prime Minister of India 2026 site:pmindia.gov.in")
+                queries.append("2024 Lok Sabha election results site:eci.gov.in")
+                if any(x in lower for x in ("government", "ruling", "in power", "governing", "coalition")):
+                    queries.extend([
+                        "Union Government India current 2026 site:pmindia.gov.in",
+                        "current Union Government India 2026 site:sansad.in",
+                    ])
             return list(dict.fromkeys(queries))[:6]
         return [clean, f"{clean} official", f"{clean} facts"]
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
+from urllib.parse import urlparse
 
 from app.schemas.investigation import InvestigationResponse, ResearchQuestion
 from app.services.claim_service import decompose_claim
@@ -13,31 +14,56 @@ from app.services.verdict_service import VerdictService
 
 
 def _raw_answer(question: str, documents: list[dict]) -> str:
-    """Return a source-grounded raw research answer, without synthesizing a verdict."""
+    """Produce a question-level research answer from retrieved source text.
+
+    This is deliberately not a verdict. It selects source-grounded passages
+    that answer the framed question and preserves uncertainty when retrieval
+    is insufficient.
+    """
     if not documents:
         return "No source page was successfully retrieved for this question."
 
-    snippets: list[str] = []
     terms = [t.lower() for t in re.findall(r"[a-zA-Z0-9]+", question) if len(t) >= 4]
+    candidates: list[tuple[float, str, dict]] = []
     for doc in documents:
         text = re.sub(r"\s+", " ", doc.get("text", "")).strip()
         if not text:
             continue
         sentences = re.split(r"(?<=[.!?])\s+", text)
-        ranked = sorted(
-            (s.strip() for s in sentences if len(s.strip()) >= 45),
-            key=lambda s: sum(1 for t in terms if t in s.lower()),
-            reverse=True,
-        )
-        for sentence in ranked[:2]:
-            if sentence not in snippets:
-                snippets.append(sentence[:700])
-        if len(snippets) >= 3:
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) < 45:
+                continue
+            lower = sentence.lower()
+            hits = sum(1 for term in terms if term in lower)
+            # Prefer sentences that answer the question, then primary sources.
+            score = hits / max(2, len(terms))
+            if any(x in lower for x in ("prime minister", "union government", "central government", "government of india", "lok sabha", "election", "formed the government", "forms the government")):
+                score += .18
+            score += min(.20, float(doc.get("source_score", 0)) * .20)
+            candidates.append((score, sentence[:900], doc))
+
+    if not candidates:
+        return "Source pages were retrieved, but no usable textual passage was extracted."
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    selected: list[str] = []
+    domains: set[str] = set()
+    for _, sentence, doc in candidates:
+        domain = urlparse(doc.get("url", "")).netloc.lower()
+        if sentence in selected:
+            continue
+        selected.append(sentence)
+        if domain:
+            domains.add(domain)
+        if len(selected) >= 3:
             break
 
-    if not snippets:
-        return "Source pages were retrieved, but no usable textual passage was extracted."
-    return " ".join(snippets[:3])
+    source_note = ""
+    if selected:
+        top = candidates[0][2]
+        source_note = f" Source: {top.get('title', 'retrieved source')} ({urlparse(top.get('url', '')).netloc.removeprefix('www.')})."
+    return " ".join(selected) + source_note
 
 
 def investigate(text: str) -> InvestigationResponse:
@@ -109,7 +135,9 @@ def investigate(text: str) -> InvestigationResponse:
             "Claim understanding: subject, jurisdiction and time",
             "Investigation broken into independently researchable questions",
             "Each question researched separately across the web",
-            "Raw answers retained as source-grounded research, not verdicts",
+            "Each framed question produces a source-grounded raw research answer",
+            "Raw question answers remain separate from the final verdict",
+            "The final synthesis answers the original investigation input, not the sub-questions",
             "Search results used for discovery; only retrieved page content enters evidence",
             "All question evidence combined and evaluated against the original claim",
             "Contradiction, scope, temporal and source-quality checks",
