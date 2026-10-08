@@ -156,8 +156,8 @@ export default function Home() {
                       <p>{s.domain || ""}</p>
                     </div>
                     <div className="sourceMeta">
-                      {s.tier && <span>Tier {s.tier}</span>}
-                      {s.quality != null && <span>{s.quality}/100</span>}
+                      {s.source_tier && <span>Tier {s.source_tier}</span>}
+                      {s.source_score != null && <span>{Math.round(s.source_score * 100)}/100</span>}
                     </div>
                   </article>
                 )) : <p className="muted">No sources retrieved yet.</p>}
@@ -168,6 +168,13 @@ export default function Home() {
               <div>
                 <h3>Claim</h3>
                 <div className="claimBox">{result.claim || text}</div>
+                {result.claim_analysis && (
+                  <div className="claimMeta">
+                    <span>Subject: <b>{result.claim_analysis.subject || "Unknown"}</b></span>
+                    <span>Jurisdiction: <b>{result.claim_analysis.jurisdiction || "Unknown"}</b></span>
+                    <span>Time: <b>{result.claim_analysis.year || "Not specified"}</b></span>
+                  </div>
+                )}
                 <h4>Claim breakdown</h4>
                 {result.claims?.length ? (
                   <ol className="claims">{result.claims.map(c => <li key={c.id}>{c.text}</li>)}</ol>
@@ -189,6 +196,12 @@ export default function Home() {
                     <h4>Methodology</h4>
                     <ul className="method">{result.methodology.map((m, i) => <li key={i}>{m}</li>)}</ul>
                   </>
+                )}
+                {result.evidence_analysis && (
+                  <div className="claimMeta">
+                    <span>Supporting domains: <b>{result.evidence_analysis.supporting_domains?.length || 0}</b></span>
+                    <span>Contradicting domains: <b>{result.evidence_analysis.contradicting_domains?.length || 0}</b></span>
+                  </div>
                 )}
                 <p className="muted">Detailed scoring and internal reasoning stay here so the main Verdict view remains focused.</p>
               </div>
