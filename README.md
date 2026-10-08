@@ -87,3 +87,10 @@ V9 RAG/semantic retrieval
 V10 Research agent
 V11 Evaluation/quality metrics
 V12 Production security, caching, async workers and monitoring
+
+## Render deployment
+
+The repository is pinned to Python 3.12.10 for backend deployment.
+The Next.js frontend uses static export and publishes `frontend/out`.
+
+See `docs/DEPLOYMENT.md` for the three-service setup.
