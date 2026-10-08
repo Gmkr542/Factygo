@@ -19,6 +19,14 @@ def investigate(text: str) -> InvestigationResponse:
         claim=text, claims=claims, verdict=verdict["verdict"], confidence=verdict["confidence"],
         explanation=verdict["explanation"], evidence=evidence, sources=researcher.normalize(documents),
         status="complete" if documents else "no_results",
-        methodology=["Claim understanding: subject, jurisdiction and time", "Claim-aware web research", "Scope and temporal evidence matching", "Source authority ranking", "Evidence stance and corroboration", "Evidence-weighted verdict with uncertainty"],
+        methodology=[
+            "Claim understanding: subject, jurisdiction and time",
+            "Claim-aware web research",
+            "Search snippets retained when page retrieval is blocked",
+            "Scope and temporal evidence matching",
+            "Source authority ranking",
+            "Evidence stance and corroboration",
+            "Evidence-weighted verdict with uncertainty",
+        ],
         claim_analysis=claim_analysis, evidence_analysis=verdict.get("analysis", {}),
     )

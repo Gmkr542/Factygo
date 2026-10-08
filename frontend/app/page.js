@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -12,16 +12,23 @@ const tabs = [
   ["analysis", "Analysis"],
 ];
 
-function label(v) {
-  return String(v || "").replaceAll("_", " ").toUpperCase();
+function label(value) {
+  return String(value || "").replaceAll("_", " ").toUpperCase();
 }
 
-function verdictTone(v) {
-  const x = String(v || "").toUpperCase();
+function verdictTone(value) {
+  const x = String(value || "").toUpperCase();
   if (x === "TRUE") return "good";
   if (x === "FALSE") return "bad";
-  if (x.includes("MOSTLY") || x === "PARTLY_TRUE") return "warn";
+  if (x.includes("MOSTLY") || x === "PARTLY_TRUE" || x === "MISLEADING") return "warn";
   return "neutral";
+}
+
+function confidenceTone(value) {
+  const n = Number(value || 0);
+  if (n >= 75) return "high";
+  if (n >= 45) return "medium";
+  return "low";
 }
 
 export default function Home() {
@@ -31,21 +38,24 @@ export default function Home() {
   const [tab, setTab] = useState("verdict");
 
   async function investigate() {
-    if (!text.trim()) return;
+    const claim = text.trim();
+    if (!claim) return;
+
     setLoading(true);
     setResult(null);
     setTab("verdict");
+
     try {
       const response = await fetch(`${API}/api/investigate`, {
         method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ text }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: claim }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Investigation failed.");
       setResult(data);
-    } catch (e) {
-      setResult({ error: e.message || "Could not connect to Factygo API." });
+    } catch (error) {
+      setResult({ error: error.message || "Could not connect to Factygo API." });
     } finally {
       setLoading(false);
     }
@@ -53,49 +63,100 @@ export default function Home() {
 
   const evidence = result?.evidence || [];
   const sources = result?.sources || [];
-  const supporting = evidence.filter(e => String(e.stance).toLowerCase() === "supporting");
-  const contradicting = evidence.filter(e => String(e.stance).toLowerCase() === "contradicting");
-  const contextual = evidence.filter(e => String(e.stance).toLowerCase() === "contextual");
+  const supporting = useMemo(
+    () => evidence.filter(e => String(e.stance).toLowerCase() === "supporting"),
+    [evidence]
+  );
+  const contradicting = useMemo(
+    () => evidence.filter(e => String(e.stance).toLowerCase() === "contradicting"),
+    [evidence]
+  );
+  const contextual = useMemo(
+    () => evidence.filter(e => String(e.stance).toLowerCase() === "contextual"),
+    [evidence]
+  );
+  const domains = new Set(sources.map(s => s.domain).filter(Boolean)).size;
+  const confidence = Number(result?.confidence || 0);
+  const noResults = result && !result.error && !evidence.length && !sources.length;
 
   return (
-    <main className="shell">
+    <main className="appShell">
+      <div className="topBar">
+        <div className="brandMark"><span className="brandDot" />FACTYGO</div>
+        <span className="topTag">EVIDENCE-FIRST INVESTIGATION</span>
+      </div>
+
       <header className="hero">
-        <div>
-          <div className="brand">FACTYGO</div>
-          <h1>Evidence-first AI investigation</h1>
-          <p>Research a claim and inspect the evidence behind the conclusion.</p>
-        </div>
+        <div className="eyebrow">AI RESEARCH WORKSPACE</div>
+        <h1>Investigate claims.<br /><span>Follow the evidence.</span></h1>
+        <p>Research a claim across the web, inspect the evidence, and see how the conclusion was reached.</p>
       </header>
 
       <section className="searchCard">
-        <label htmlFor="claim">Investigate a claim</label>
+        <div className="searchLabelRow">
+          <label htmlFor="claim">What do you want to investigate?</label>
+          <span>TEXT INPUT</span>
+        </div>
         <textarea
           id="claim"
           value={text}
           onChange={e => setText(e.target.value)}
+          onKeyDown={e => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") investigate();
+          }}
           placeholder="e.g. Is Congress the central government in India in 2026?"
           rows={4}
+          disabled={loading}
         />
-        <div className="searchRow">
-          <span className="hint">Text is enough. Attachments remain optional.</span>
-          <button onClick={investigate} disabled={loading || !text.trim()}>
-            {loading ? "Investigating…" : "Investigate"}
+        <div className="searchFooter">
+          <span className="hint">Attachments are optional · Ctrl/Cmd + Enter to investigate</span>
+          <button className="primaryButton" onClick={investigate} disabled={loading || !text.trim()}>
+            {loading ? <><span className="spinner" /> Researching…</> : <>Investigate <span>→</span></>}
           </button>
         </div>
       </section>
 
-      {result?.error && <section className="error">{result.error}</section>}
+      {loading && (
+        <section className="loadingCard">
+          <div className="loadingIcon"><span className="spinner dark" /></div>
+          <div>
+            <strong>Investigating claim</strong>
+            <p>Searching the web and evaluating available evidence…</p>
+          </div>
+        </section>
+      )}
+
+      {result?.error && (
+        <section className="stateCard errorState">
+          <div className="stateIcon">!</div>
+          <div>
+            <strong>Investigation failed</strong>
+            <p>{result.error}</p>
+            <button className="secondaryButton" onClick={investigate}>Try again</button>
+          </div>
+        </section>
+      )}
 
       {result && !result.error && (
-        <section className="resultCard">
-          <div className="resultHead">
-            <div>
-              <span className={`badge ${verdictTone(result.verdict)}`}>{label(result.verdict)}</span>
+        <section className="investigationCard">
+          <div className="resultHero">
+            <div className="verdictBlock">
+              <div className={`verdictBadge ${verdictTone(result.verdict)}`}>
+                <span className="statusDot" />
+                {label(result.verdict)}
+              </div>
               <h2>{result.explanation || "Factygo completed the investigation."}</h2>
+              <div className="resultMeta">
+                <span>{label(result.status || "complete")}</span>
+                <span>•</span>
+                <span>{domains} independent {domains === 1 ? "domain" : "domains"}</span>
+              </div>
             </div>
-            <div className="confidence">
-              <strong>{result.confidence ?? 0}%</strong>
-              <span>confidence</span>
+            <div className={`confidenceMeter ${confidenceTone(confidence)}`}>
+              <div className="confidenceRing" style={{ "--confidence": `${confidence}%` }}>
+                <div><strong>{confidence}</strong><small>%</small></div>
+              </div>
+              <span>CONFIDENCE</span>
             </div>
           </div>
 
@@ -107,110 +168,146 @@ export default function Home() {
                 onClick={() => setTab(id)}
               >
                 {name}
-                {id === "evidence" && <small>{evidence.length}</small>}
-                {id === "sources" && <small>{sources.length}</small>}
+                {id === "evidence" && <em>{evidence.length}</em>}
+                {id === "sources" && <em>{sources.length}</em>}
               </button>
             ))}
           </nav>
 
           <div className="panel">
             {tab === "verdict" && (
-              <div>
-                <h3>Verdict</h3>
-                <p className="lead">{result.explanation || "No explanation was returned."}</p>
-                <div className="stats">
-                  <div><b>{supporting.length}</b><span>Supporting</span></div>
-                  <div><b>{contradicting.length}</b><span>Contradicting</span></div>
-                  <div><b>{contextual.length}</b><span>Context</span></div>
-                  <div><b>{sources.length}</b><span>Sources</span></div>
+              <div className="panelContent">
+                <div className="panelHeader">
+                  <div>
+                    <span className="sectionKicker">CONCLUSION</span>
+                    <h3>Verdict</h3>
+                  </div>
                 </div>
-                {result.status && <p className="muted">Investigation status: {label(result.status)}</p>}
+
+                {noResults ? (
+                  <div className="emptyState">
+                    <div className="emptyIcon">?</div>
+                    <h4>No sufficiently relevant evidence</h4>
+                    <p>Factygo could not retrieve enough reliable web evidence to determine whether this claim is true or false. It will not invent a verdict.</p>
+                    <button className="secondaryButton" onClick={investigate}>Search again</button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="lead">{result.explanation || "No explanation was returned."}</p>
+                    <div className="summaryGrid">
+                      <div><span>SUPPORTING</span><strong>{supporting.length}</strong></div>
+                      <div><span>CONTRADICTING</span><strong>{contradicting.length}</strong></div>
+                      <div><span>CONTEXT</span><strong>{contextual.length}</strong></div>
+                      <div><span>SOURCES</span><strong>{sources.length}</strong></div>
+                    </div>
+                    <div className="quickInsight">
+                      <span className="insightIcon">i</span>
+                      <div><strong>Evidence overview</strong><p>{supporting.length ? `${supporting.length} supporting item${supporting.length === 1 ? "" : "s"} found.` : "No direct supporting evidence found."} {contradicting.length ? `${contradicting.length} contradiction${contradicting.length === 1 ? "" : "s"} detected.` : "No direct contradiction detected."}</p></div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
             {tab === "evidence" && (
-              <div>
-                <h3>Web Evidence</h3>
-                {evidence.length ? evidence.map((e, i) => (
-                  <article className="evidence" key={e.id || i}>
-                    <div className="evidenceTop">
-                      <span className={`stance ${String(e.stance).toLowerCase()}`}>{label(e.stance)}</span>
-                      {e.relevance != null && <span>{e.relevance}% relevant</span>}
-                      {e.strength != null && <span>{e.strength}% strength</span>}
-                    </div>
-                    <p>{e.excerpt}</p>
-                    {e.reason && <small>{e.reason}</small>}
-                    {e.source_url && <a href={e.source_url} target="_blank" rel="noreferrer">Open source ↗</a>}
-                  </article>
-                )) : <p className="muted">No sufficiently relevant web evidence was retrieved.</p>}
+              <div className="panelContent">
+                <div className="panelHeader">
+                  <div><span className="sectionKicker">WEB RESEARCH</span><h3>Evidence</h3></div>
+                  <span className="countPill">{evidence.length} items</span>
+                </div>
+                {evidence.length ? (
+                  <div className="evidenceList">
+                    {evidence.map((e, i) => (
+                      <article className="evidenceCard" key={e.id || i}>
+                        <div className="cardTop">
+                          <span className={`stance ${String(e.stance).toLowerCase()}`}>{label(e.stance)}</span>
+                          <div className="metricPills">
+                            {e.relevance != null && <span>Relevance <b>{e.relevance}%</b></span>}
+                            {e.strength != null && <span>Strength <b>{e.strength}%</b></span>}
+                          </div>
+                        </div>
+                        <p className="quote">“{e.excerpt}”</p>
+                        {e.reason && <p className="reason">{e.reason}</p>}
+                        {e.source_url && <a className="sourceLink" href={e.source_url} target="_blank" rel="noreferrer">Open original source <span>↗</span></a>}
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="emptyState compact"><div className="emptyIcon">⌕</div><h4>No web evidence</h4><p>No sufficiently relevant evidence was retrieved.</p></div>
+                )}
               </div>
             )}
 
             {tab === "sources" && (
-              <div>
-                <h3>Sources</h3>
-                {sources.length ? sources.map((s, i) => (
-                  <article className="source" key={s.url || i}>
-                    <div>
-                      <a href={s.url} target="_blank" rel="noreferrer">{s.title || s.url}</a>
-                      <p>{s.domain || ""}</p>
-                    </div>
-                    <div className="sourceMeta">
-                      {s.source_tier && <span>Tier {s.source_tier}</span>}
-                      {s.source_score != null && <span>{Math.round(s.source_score * 100)}/100</span>}
-                    </div>
-                  </article>
-                )) : <p className="muted">No sources retrieved yet.</p>}
+              <div className="panelContent">
+                <div className="panelHeader">
+                  <div><span className="sectionKicker">WEB RESEARCH</span><h3>Sources</h3></div>
+                  <span className="countPill">{sources.length} sources</span>
+                </div>
+                {sources.length ? (
+                  <div className="sourceList">
+                    {sources.map((s, i) => (
+                      <article className="sourceCard" key={s.url || i}>
+                        <div className="sourceIcon">↗</div>
+                        <div className="sourceMain">
+                          <a href={s.url} target="_blank" rel="noreferrer">{s.title || s.url}</a>
+                          <span>{s.domain || "Unknown domain"}</span>
+                        </div>
+                        <div className="sourceMeta">
+                          {s.source_tier && <span>Tier {s.source_tier}</span>}
+                          {s.source_score != null && <strong>{Math.round(s.source_score * 100)}/100</strong>}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="emptyState compact"><div className="emptyIcon">◎</div><h4>No sources retrieved</h4><p>Factygo has no sources to display for this investigation.</p></div>
+                )}
               </div>
             )}
 
             {tab === "claim" && (
-              <div>
+              <div className="panelContent">
+                <span className="sectionKicker">CLAIM UNDERSTANDING</span>
                 <h3>Claim</h3>
                 <div className="claimBox">{result.claim || text}</div>
                 {result.claim_analysis && (
-                  <div className="claimMeta">
-                    <span>Subject: <b>{result.claim_analysis.subject || "Unknown"}</b></span>
-                    <span>Jurisdiction: <b>{result.claim_analysis.jurisdiction || "Unknown"}</b></span>
-                    <span>Time: <b>{result.claim_analysis.year || "Not specified"}</b></span>
+                  <div className="detailGrid">
+                    <div><span>SUBJECT</span><b>{result.claim_analysis.subject || "Unknown"}</b></div>
+                    <div><span>JURISDICTION</span><b>{result.claim_analysis.jurisdiction || "Unknown"}</b></div>
+                    <div><span>YEAR</span><b>{result.claim_analysis.year || "Not specified"}</b></div>
+                    <div><span>TYPE</span><b>{label(result.claim_analysis.claim_type || "Unknown")}</b></div>
                   </div>
                 )}
                 <h4>Claim breakdown</h4>
-                {result.claims?.length ? (
-                  <ol className="claims">{result.claims.map(c => <li key={c.id}>{c.text}</li>)}</ol>
-                ) : <p className="muted">No additional claim decomposition was returned.</p>}
+                {result.claims?.length ? <ol className="claims">{result.claims.map(c => <li key={c.id}>{c.text}</li>)}</ol> : <p className="muted">No additional decomposition returned.</p>}
               </div>
             )}
 
             {tab === "analysis" && (
-              <div>
+              <div className="panelContent">
+                <span className="sectionKicker">INVESTIGATION INTELLIGENCE</span>
                 <h3>Analysis</h3>
-                <div className="analysisGrid">
-                  <div><span>Supporting</span><b>{supporting.length}</b></div>
-                  <div><span>Contradicting</span><b>{contradicting.length}</b></div>
-                  <div><span>Contextual</span><b>{contextual.length}</b></div>
-                  <div><span>Independent domains</span><b>{new Set(sources.map(s => s.domain).filter(Boolean)).size}</b></div>
+                <div className="detailGrid four">
+                  <div><span>SUPPORTING</span><b>{supporting.length}</b></div>
+                  <div><span>CONTRADICTING</span><b>{contradicting.length}</b></div>
+                  <div><span>CONTEXTUAL</span><b>{contextual.length}</b></div>
+                  <div><span>INDEPENDENT DOMAINS</span><b>{domains}</b></div>
                 </div>
-                {result.methodology?.length > 0 && (
-                  <>
-                    <h4>Methodology</h4>
-                    <ul className="method">{result.methodology.map((m, i) => <li key={i}>{m}</li>)}</ul>
-                  </>
-                )}
                 {result.evidence_analysis && (
-                  <div className="claimMeta">
-                    <span>Supporting domains: <b>{result.evidence_analysis.supporting_domains?.length || 0}</b></span>
-                    <span>Contradicting domains: <b>{result.evidence_analysis.contradicting_domains?.length || 0}</b></span>
+                  <div className="analysisNote">
+                    <strong>Corroboration</strong>
+                    <p>{result.evidence_analysis.supporting_domains?.length || 0} supporting domains · {result.evidence_analysis.contradicting_domains?.length || 0} contradicting domains</p>
                   </div>
                 )}
-                <p className="muted">Detailed scoring and internal reasoning stay here so the main Verdict view remains focused.</p>
+                {result.methodology?.length > 0 && <><h4>Methodology</h4><ul className="method">{result.methodology.map((m, i) => <li key={i}>{m}</li>)}</ul></>}
               </div>
             )}
           </div>
         </section>
       )}
 
-      <footer>FACTYGO · Evidence-first investigation</footer>
+      <footer><span>FACTYGO</span> · Evidence-first AI investigation · Evidence over assumption</footer>
     </main>
   );
 }
