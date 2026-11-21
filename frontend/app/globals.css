@@ -1133,3 +1133,66 @@ a.unifiedSourceCard:hover .unifiedCardTitle { color: var(--accent); }
   flex-direction: column;
   gap: 4px;
 }
+
+
+.appShell {
+  min-height: 100vh;
+  transition: padding-top 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.appShell.workspaceIdle {
+  padding-top: 48px;
+}
+
+.appShell.workspaceActive {
+  padding-top: 14px;
+}
+
+.appShell.workspaceActive .topBar {
+  margin-bottom: 18px;
+  transition: margin-bottom 0.3s ease;
+}
+
+.appShell.workspaceActive .hero {
+  margin: 0 auto 14px;
+  transition: margin 0.3s ease;
+}
+
+.appShell.workspaceActive .hero h1 {
+  font-size: 26px;
+  margin-bottom: 6px;
+  transition: font-size 0.3s ease, margin 0.3s ease;
+}
+
+.appShell.workspaceActive .heroSubtitleClean {
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.appShell.workspaceActive .searchCard {
+  margin-bottom: 18px;
+  box-shadow: 0 6px 24px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.appShell.workspaceActive .loadingState {
+  margin: 18px auto 28px;
+  min-height: 140px;
+  display: flex;
+  align-items: center;
+}
+
+.appShell.workspaceActive .investigationReport {
+  margin-top: 14px;
+}
+
+@media (max-width: 640px) {
+  .appShell.workspaceIdle {
+    padding-top: 24px;
+  }
+  .appShell.workspaceActive {
+    padding-top: 10px;
+  }
+  .appShell.workspaceActive .hero h1 {
+    font-size: 21px;
+  }
+}

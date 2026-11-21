@@ -432,7 +432,7 @@ export default function Home() {
   }
 
   return (
-    <main className="appShell">
+    <main className={"appShell" + ((loading || (result && !result.error)) ? " workspaceActive" : " workspaceIdle")}>
       <div className="topBar">
         <div className="brandGroup">
           <div className="brandMark"><span className="brandDot" />FACTYGO</div>
