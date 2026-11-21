@@ -4,6 +4,19 @@ import re
 from app.services.claim_intelligence import ClaimIntelligence
 
 
+def classify_study_tier(title: str, text: str, source_type: str) -> tuple[str, int]:
+    blob = f"{title} {text}".lower()
+    if any(k in blob for k in ("systematic review", "meta-analysis", "randomized controlled trial", "randomised controlled trial", "double-blind", "cochrane")):
+        return ("Tier 1 · Meta-Analysis / RCT", 1)
+    if any(k in blob for k in ("clinical trial", "cohort study", "human trial", "clinical study", "who ", "cdc ", "nih ", "government", "official")):
+        return ("Tier 2 · Clinical / Official", 2)
+    if any(k in blob for k in ("in vitro", "in-vitro", "mice", "mouse", "rat model", "rodent", "animal study", "cell line", "preclinical")):
+        return ("Tier 3 · Preclinical / Animal", 3)
+    if "academic" in source_type.lower() or "reference" in source_type.lower():
+        return ("Tier 2 · Reference / Study", 2)
+    return ("Tier 4 · News / General Web", 4)
+
+
 class EvidenceService:
     STOPWORDS = {
         "the", "and", "for", "with", "that", "this", "from", "into", "about",
@@ -32,6 +45,17 @@ class EvidenceService:
             excerpt = self._best_excerpt(text, terms) or title
             relevance = self._relevance(f"{title} {excerpt}", terms)
             source_score = float(doc.get("source_score", doc.get("source_quality", 65) / 100.0))
+            source_type = doc.get("source_type", "Web Source")
+            study_tier_label, study_tier_num = classify_study_tier(title, excerpt, source_type)
+
+            # Jurisdiction check (Union vs State)
+            j_match = True
+            if meta.get("jurisdiction") == "UNION":
+                low_blob = f"{title} {excerpt}".lower()
+                if any(st in low_blob for st in ClaimIntelligence.STATE_TERMS) and not any(
+                    u in low_blob for u in ("prime minister", "lok sabha", "union government", "central government", "government of india", "nda")
+                ):
+                    j_match = False
 
             llm_item = assessment_map.get(eid)
             if llm_item:
@@ -41,7 +65,10 @@ class EvidenceService:
                 strength = round(min(1.0, max(0.0, float(llm_item.get("strength", 0.6)))), 3)
                 reason = str(llm_item.get("reason") or "Evaluated against the claim.").strip()
             else:
-                stance, reason = self._heuristic_stance(f"{title} {excerpt}".lower())
+                if not j_match:
+                    stance, reason = "contextual", "Passage describes state-level governance rather than the Union Government."
+                else:
+                    stance, reason = self._heuristic_stance(f"{title} {excerpt}".lower(), claim.lower())
                 strength = round(min(1.0, relevance * 0.6 + source_score * 0.4), 3)
 
             evidence.append({
@@ -55,9 +82,11 @@ class EvidenceService:
                 "relevance": round(min(1.0, max(relevance, 0.25 if llm_item else relevance)), 3),
                 "source_score": round(source_score, 2),
                 "source_tier": doc.get("tier", 3),
-                "source_type": doc.get("source_type", "Web Source"),
+                "source_type": source_type,
+                "study_tier": study_tier_label,
+                "study_tier_rank": study_tier_num,
                 "full_article_read": bool(doc.get("full_article_read", False)),
-                "jurisdiction_match": True,
+                "jurisdiction_match": j_match,
                 "temporal_match": self._time_match(f"{title} {excerpt}", meta.get("year")),
                 "strength": strength,
                 "reason": reason,
@@ -93,7 +122,9 @@ class EvidenceService:
         return " ".join(scored[:2])[:900]
 
     @staticmethod
-    def _heuristic_stance(lower: str) -> tuple[str, str]:
+    def _heuristic_stance(lower: str, claim_lower: str = "") -> tuple[str, str]:
+        if "congress" in claim_lower and "prime minister" in lower and ("narendra modi" in lower or "bjp" in lower or "nda" in lower):
+            return "contradicting", "Official record shows Narendra Modi (BJP/NDA) leads the Government of India."
         contra_cues = ("no evidence", "does not", "do not", "myth", "false", "unlikely", "insufficient evidence", "not proven", "contradict", "debunk", "overtake", "surpasses")
         support_cues = ("study shows", "clinical trial", "significantly reduced", "lowered cholesterol", "confirmed", "evidence shows", "found that")
         if any(c in lower for c in contra_cues):

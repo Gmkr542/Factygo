@@ -4,6 +4,8 @@ import re
 
 
 class QuestionService:
+    """Generates balanced support + adversarial counter-evidence queries to eliminate sycophancy."""
+
     @classmethod
     def frame(cls, claim: str, claim_analysis: dict | None = None) -> list[str]:
         text = re.sub(r"\s+", " ", claim).strip()
@@ -12,8 +14,8 @@ class QuestionService:
 
         if domain == "health_science":
             questions = [
-                f"{text} clinical study evidence",
-                f"{text} medical review research",
+                f"{text} clinical trial meta-analysis evidence",
+                f"{text} limitations side effects OR no evidence",
             ]
         elif domain == "settled_science":
             questions = [
@@ -24,11 +26,12 @@ class QuestionService:
             questions = [
                 f"{text} official government record",
                 "Which party or coalition currently forms the Union Government of India?",
+                f"{text} Lok Sabha election results",
             ]
         else:
             questions = [
                 text,
-                f"{text} fact check evidence",
+                f"{text} limitations OR debunked OR counter evidence",
             ]
 
         result: list[str] = []

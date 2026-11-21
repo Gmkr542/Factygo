@@ -39,7 +39,6 @@ button { cursor: pointer; }
   padding: 28px 20px 80px;
 }
 
-/* Top Bar */
 .topBar {
   display: flex;
   align-items: center;
@@ -66,19 +65,9 @@ button { cursor: pointer; }
   box-shadow: 0 0 0 4px var(--accent-soft);
 }
 
-.topTag {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--muted);
-  letter-spacing: 0.02em;
-}
+.topTag { font-size: 11px; font-weight: 500; color: var(--muted); letter-spacing: 0.02em; }
 
-/* Minimal Hero */
-.hero {
-  text-align: center;
-  margin: 0 auto 32px;
-  max-width: 600px;
-}
+.hero { text-align: center; margin: 0 auto 32px; max-width: 620px; }
 
 .eyebrow {
   display: inline-block;
@@ -102,19 +91,10 @@ button { cursor: pointer; }
   color: var(--ink);
 }
 
-.hero h1 span {
-  color: var(--muted);
-  font-weight: 600;
-}
+.hero h1 span { color: var(--muted); font-weight: 600; }
+.hero p { font-size: 15px; line-height: 1.6; color: var(--ink-secondary); margin: 0; }
 
-.hero p {
-  font-size: 15px;
-  line-height: 1.6;
-  color: var(--ink-secondary);
-  margin: 0;
-}
-
-/* Google-Style Search Card */
+/* Search Card & Mode Switcher */
 .searchCard {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -129,20 +109,34 @@ button { cursor: pointer; }
   box-shadow: 0 8px 28px rgba(26, 115, 232, 0.08), 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
-.searchLabelRow {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
+.searchLabelRow { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.searchLabelRow > span { display: none; }
+
+.modePills {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--line-soft);
+  border-radius: 999px;
 }
 
-.searchLabelRow label {
-  font-size: 12px;
+.modePill {
+  border: 0;
+  background: transparent;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 11.5px;
   font-weight: 600;
-  color: var(--ink-secondary);
+  color: var(--muted);
+  transition: all 0.15s ease;
 }
 
-.searchLabelRow span { display: none; }
+.modePill.active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
 .inputWrap { position: relative; }
 
 textarea {
@@ -162,7 +156,6 @@ textarea {
 
 textarea::placeholder { color: #9ca3af; }
 
-/* Floating Autocomplete Dropdown */
 .suggestionsDropdown {
   position: absolute;
   top: calc(100% + 14px);
@@ -275,7 +268,7 @@ textarea::placeholder { color: #9ca3af; }
 .spinner.dark { border-color: #dbeafe; border-top-color: var(--accent); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Stepped Loading Card & Shimmer */
+/* Loading & State Cards */
 .loadingCard, .stateCard {
   margin-top: 20px;
   background: var(--surface);
@@ -332,7 +325,7 @@ textarea::placeholder { color: #9ca3af; }
 .loadingCard p, .stateCard p { margin: 3px 0 0; font-size: 13px; color: var(--muted); }
 .errorState .stateIcon { background: var(--red-bg); color: var(--red); }
 
-/* Unified Zero-Tab Result Card */
+/* Result Card */
 .investigationCard {
   margin-top: 24px;
   background: var(--surface);
@@ -407,7 +400,27 @@ textarea::placeholder { color: #9ca3af; }
   margin: 14px 0 12px;
 }
 
-/* Sub-Claim Verdicts List */
+.takeawayList {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-secondary);
+}
+
+.takeawayList li { margin-bottom: 4px; }
+
+.caveatBanner {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--amber);
+  background: var(--amber-bg);
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
 .subClaimList {
   display: flex;
   flex-direction: column;
@@ -419,12 +432,7 @@ textarea::placeholder { color: #9ca3af; }
   border-radius: 12px;
 }
 
-.subClaimRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-}
+.subClaimRow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
 
 .subClaimBadge {
   font-size: 9.5px;
@@ -438,17 +446,10 @@ textarea::placeholder { color: #9ca3af; }
 .subClaimBadge.bad { background: var(--red-bg); color: var(--red); }
 .subClaimBadge.warn { background: var(--amber-bg); color: var(--amber); }
 .subClaimBadge.neutral { background: var(--line-soft); color: var(--ink-secondary); }
-
 .subClaimText { color: var(--ink-secondary); flex: 1; }
 
-.unifiedMetaStrip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 12px;
-}
+.unifiedMetaStrip { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 
-/* Citation Pills */
 .citationCluster { display: inline-flex; gap: 3px; margin: 0 2px; vertical-align: baseline; }
 
 .citationPill {
@@ -459,7 +460,7 @@ textarea::placeholder { color: #9ca3af; }
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
-  padding: 2px 6px;
+  padding: 3px 7px;
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent);
@@ -470,7 +471,6 @@ textarea::placeholder { color: #9ca3af; }
 
 a.citationPill:hover { background: var(--accent); color: #ffffff; border-color: var(--accent); }
 
-/* Visual Evidence Distribution Ratio Bar */
 .compactRatio { margin-top: 10px; }
 
 .ratioLegend {
@@ -498,7 +498,6 @@ a.citationPill:hover { background: var(--accent); color: #ffffff; border-color: 
 .ratioSeg.con { background: #d93025; }
 .ratioSeg.ctx { background: #94a3b8; }
 
-/* Confidence Ring */
 .confidenceMeter { min-width: 84px; text-align: center; flex: none; }
 
 .confidenceRing {
@@ -530,7 +529,103 @@ a.citationPill:hover { background: var(--accent); color: #ffffff; border-color: 
 
 .confidenceLabel { font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; color: var(--muted); }
 
-/* Unified Body & Clickable Web Sources + Evidence Cards */
+/* Visual & Citation Audit Cards */
+.visualSection {
+  padding: 20px 28px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.visualCard {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: #fafbfe;
+}
+
+.visualHeader { margin-bottom: 12px; }
+
+.visualBadge {
+  display: inline-block;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-bottom: 4px;
+}
+
+.visualHeader h4 {
+  margin: 0;
+  font-family: "Plus Jakarta Sans", sans-serif;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.auditList { display: flex; flex-direction: column; gap: 10px; }
+
+.auditRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  font-size: 12.5px;
+}
+
+.auditBody { flex: 1; min-width: 0; color: var(--ink); }
+.auditBody p { margin: 3px 0 0; font-size: 12px; color: var(--muted); }
+
+.tableWrap { overflow-x: auto; }
+
+.visualTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  background: var(--surface);
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+.visualTable th {
+  text-align: left;
+  padding: 9px 12px;
+  background: #f3f4f6;
+  font-weight: 600;
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+
+.visualTable td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--ink-secondary);
+  vertical-align: top;
+}
+
+.visualTable tr:last-child td { border-bottom: 0; }
+
+.timelineList { display: flex; flex-direction: column; gap: 10px; }
+.timelineRow { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; }
+.timelineDate { min-width: 74px; font-family: "Plus Jakarta Sans", sans-serif; font-size: 11.5px; font-weight: 700; color: var(--accent); padding-top: 2px; }
+.timelineDot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-top: 6px; flex: none; }
+.timelineBody { flex: 1; color: var(--ink-secondary); line-height: 1.45; }
+
+.barChartList { display: flex; flex-direction: column; gap: 10px; }
+.barChartTop { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; margin-bottom: 4px; }
+.barChartLabel { color: var(--ink-secondary); font-weight: 500; }
+.barChartVal { font-family: "Plus Jakarta Sans", sans-serif; color: var(--ink); }
+.barChartTrack { height: 8px; background: var(--line); border-radius: 999px; overflow: hidden; }
+.barChartFill { height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.4s ease; }
+
+/* Unified Body & Sources */
 .unifiedBody { padding: 24px 28px 28px; }
 
 .sectionHeaderRow {
@@ -560,7 +655,6 @@ a.citationPill:hover { background: var(--accent); color: #ffffff; border-color: 
 }
 
 .clickHint { font-size: 11.5px; color: var(--muted); }
-
 .cardStack { display: flex; flex-direction: column; gap: 12px; }
 
 .unifiedSourceCard {
@@ -635,21 +729,21 @@ a.unifiedSourceCard:hover .unifiedCardTitle { color: var(--accent); }
   border-radius: 6px;
 }
 
+.studyTierPill {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
 .metaPill {
   font-size: 10.5px;
   font-weight: 500;
   color: var(--muted);
   background: #f9fafb;
   border: 1px solid var(--line-soft);
-  padding: 3px 8px;
-  border-radius: 6px;
-}
-
-.authorityPill {
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-soft);
   padding: 3px 8px;
   border-radius: 6px;
 }
@@ -665,9 +759,27 @@ a.unifiedSourceCard:hover .unifiedCardTitle { color: var(--accent); }
 
 .unifiedReason { margin: 6px 0 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
 
-/* Collapsible Research, Symbolic Logic & Methodology Drawer */
+.showMoreSourcesBtn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px dashed var(--line);
+  background: #f9fafb;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  transition: all 0.15s ease;
+}
+
+.showMoreSourcesBtn:hover {
+  background: var(--accent-soft);
+  border-color: #c2d7fa;
+  color: var(--accent);
+}
+
 .researchDrawer {
-  margin-top: 22px;
+  margin-top: 20px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #f9fafb;

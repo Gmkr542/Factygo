@@ -43,6 +43,11 @@ def _clean_text(value: str) -> str:
     return " ".join(unescaped.replace("\xa0", " ").split()).strip()
 
 
+def _headline_fingerprint(title: str) -> str:
+    words = [w for w in re.findall(r"[a-z0-9]{3,}", title.lower()) if w not in _STOPWORDS]
+    return " ".join(words[:7])
+
+
 def _quality(source_type: str) -> tuple[int, str, int]:
     kind = str(source_type or "").lower()
     if "government" in kind or "official" in kind:
@@ -74,16 +79,22 @@ def _canonical_url(value: str) -> str:
 
 def _normalise(results: list[dict]) -> list[dict]:
     out = []
-    seen = set()
+    seen_urls = set()
+    seen_headlines = set()
     for x in results:
         if not isinstance(x, dict):
             continue
         u = x.get("href") or x.get("url") or ""
         canonical = _canonical_url(u)
-        if not canonical or canonical in seen:
+        if not canonical or canonical in seen_urls:
             continue
-        seen.add(canonical)
         title = _clean_text(x.get("title", ""))[:300]
+        fp = _headline_fingerprint(title)
+        if len(fp) >= 22 and fp in seen_headlines:
+            continue
+        seen_urls.add(canonical)
+        if fp:
+            seen_headlines.add(fp)
         domain = str(x.get("domain") or "").strip().lower().removeprefix("www.")
         if not domain:
             domain = urlparse(u).netloc.lower().removeprefix("www.")
@@ -104,6 +115,7 @@ def _normalise(results: list[dict]) -> list[dict]:
             "source_score": round(quality / 100.0, 2),
             "source_tier": tier_label,
             "tier": tier_num,
+            "is_primary_origin": tier_num == 1,
         })
     return out
 
@@ -149,7 +161,7 @@ async def _google_news(query: str, max_results: int) -> list[dict]:
         async with httpx.AsyncClient(
             timeout=get_settings().search_timeout,
             follow_redirects=True,
-            headers={"User-Agent": "Factygo/2.0"},
+            headers={"User-Agent": "Factygo/3.0"},
         ) as client:
             r = await client.get(url)
             r.raise_for_status()
@@ -183,7 +195,7 @@ async def _pubmed_fallback(query: str, max_results: int = 3) -> list[dict]:
     if not keywords:
         return []
     try:
-        async with httpx.AsyncClient(timeout=get_settings().search_timeout, headers={"User-Agent": "Factygo/2.0"}) as client:
+        async with httpx.AsyncClient(timeout=get_settings().search_timeout, headers={"User-Agent": "Factygo/3.0"}) as client:
             sr = await client.get(
                 "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
                 params={"db": "pubmed", "term": keywords, "retmode": "json", "retmax": max_results},
@@ -220,7 +232,7 @@ async def _pubmed_fallback(query: str, max_results: int = 3) -> list[dict]:
 async def _wikipedia_fallback(query: str, max_results: int = 3) -> list[dict]:
     keywords = " ".join(list(_terms(query))[:6]) or query[:100]
     try:
-        async with httpx.AsyncClient(timeout=get_settings().search_timeout, headers={"User-Agent": "Factygo/2.0"}) as client:
+        async with httpx.AsyncClient(timeout=get_settings().search_timeout, headers={"User-Agent": "Factygo/3.0"}) as client:
             r = await client.get(
                 "https://en.wikipedia.org/w/api.php",
                 params={"action": "query", "list": "search", "srsearch": keywords, "format": "json", "srlimit": max_results},
@@ -371,5 +383,6 @@ class ResearchService:
                 "source_quality": doc.get("source_quality", 65),
                 "source_tier": doc.get("source_tier", "General Web"),
                 "relevance_score": doc.get("relevance_score", 0),
+                "is_primary_origin": bool(doc.get("is_primary_origin", False)),
             })
         return normalized

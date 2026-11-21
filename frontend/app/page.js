@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-const SAMPLE_PROMPTS = [
+const CLAIM_PROMPTS = [
   { text: "Everyday moon is orange", tag: "Science" },
   { text: "India is less populated country", tag: "Fact Check" },
   { text: "Lemon juice reduces diabetes", tag: "Health" },
@@ -15,11 +15,22 @@ const SAMPLE_PROMPTS = [
   { text: "Antibiotics are effective against viral infections like the common cold", tag: "Health" },
 ];
 
+const AUDIT_PROMPTS = [
+  {
+    text: "According to a 2023 landmark study (DOI: 10.1038/s41586-023-99999-z, PMID: 99999999), drinking 5 liters of lemon water cures Type 2 diabetes in 48 hours.",
+    tag: "Hallucinated DOI & PMID",
+  },
+  {
+    text: "The seminal Attention Is All You Need paper (arXiv:1706.03762) introduced the Transformer architecture in 2017.",
+    tag: "Valid arXiv Citation",
+  },
+];
+
 const LOADING_STEPS = [
-  "Decomposing sub-claims & routing knowledge mode…",
-  "Searching PubMed, Wikipedia, news, and authoritative sources…",
-  "Deep-reading top articles & running symbolic math/date checks…",
-  "Synthesizing grounded verdict with citations…",
+  "Decomposing sub-claims & framing adversarial search queries…",
+  "Auditing DOIs/PMIDs & searching PubMed, Wikipedia, and news…",
+  "Deep-reading top articles & grading Evidence Pyramid tiers…",
+  "Running symbolic math/unit checks & synthesizing report…",
 ];
 
 function label(value) {
@@ -28,8 +39,8 @@ function label(value) {
 
 function verdictTone(value) {
   const x = String(value || "").toUpperCase();
-  if (x === "TRUE") return "good";
-  if (x === "FALSE") return "bad";
+  if (x === "TRUE" || x === "VERIFIED") return "good";
+  if (x === "FALSE" || x === "HALLUCINATED" || x === "BROKEN_LINK") return "bad";
   if (x.includes("MOSTLY") || x === "PARTLY_TRUE" || x === "PARTLY TRUE" || x === "MISLEADING") return "warn";
   return "neutral";
 }
@@ -68,9 +79,10 @@ function renderWithCitations(text, evidenceById, sources) {
           const url = ev?.source_url || fallbackSrc?.url || "";
           const title = ev?.source_title || fallbackSrc?.title || eid;
           const domain = extractDomain(url, ev?.domain || fallbackSrc?.domain || "");
+          const excerpt = ev?.excerpt ? ` — “${ev.excerpt.slice(0, 140)}...”` : "";
           if (!url) {
             return (
-              <sup key={eid} className="citationPill" title={title}>
+              <sup key={eid} className="citationPill" title={`${title}${excerpt}`}>
                 {eid}
               </sup>
             );
@@ -82,7 +94,7 @@ function renderWithCitations(text, evidenceById, sources) {
                 target="_blank"
                 rel="noreferrer"
                 className="citationPill"
-                title={`${eid}: ${title}${domain ? ` (${domain})` : ""}`}
+                title={`${eid}: ${title}${domain ? ` (${domain})` : ""}${excerpt}`}
               >
                 {eid}
               </a>
@@ -94,24 +106,122 @@ function renderWithCitations(text, evidenceById, sources) {
   });
 }
 
+function AdaptiveVisualBlock({ block, evidenceById, sources }) {
+  if (!block || !block.type) return null;
+
+  if (block.type === "table" && Array.isArray(block.headers) && Array.isArray(block.rows)) {
+    return (
+      <div className="visualCard">
+        <div className="visualHeader">
+          <span className="visualBadge">STRUCTURED COMPARISON</span>
+          <h4>{block.title || "Evidence Comparison"}</h4>
+        </div>
+        <div className="tableWrap">
+          <table className="visualTable">
+            <thead>
+              <tr>
+                {block.headers.map((h, i) => (
+                  <th key={i}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, rIdx) => (
+                <tr key={rIdx}>
+                  {row.map((cell, cIdx) => (
+                    <td key={cIdx}>{renderWithCitations(cell, evidenceById, sources)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === "timeline" && Array.isArray(block.events)) {
+    return (
+      <div className="visualCard">
+        <div className="visualHeader">
+          <span className="visualBadge">CHRONOLOGICAL TIMELINE</span>
+          <h4>{block.title || "Verified Timeline"}</h4>
+        </div>
+        <div className="timelineList">
+          {block.events.map((ev, idx) => (
+            <div key={idx} className="timelineRow">
+              <span className="timelineDate">{ev.date}</span>
+              <span className="timelineDot" />
+              <div className="timelineBody">
+                <span>{ev.label}</span>
+                {ev.evidence_id && renderWithCitations(`(${ev.evidence_id})`, evidenceById, sources)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === "bar_chart" && Array.isArray(block.bars)) {
+    const maxVal = Math.max(...block.bars.map(b => Number(b.value) || 0), 1);
+    return (
+      <div className="visualCard">
+        <div className="visualHeader">
+          <span className="visualBadge">QUANTITATIVE DATA</span>
+          <h4>{block.title || "Quantitative Breakdown"}</h4>
+        </div>
+        <div className="barChartList">
+          {block.bars.map((bar, idx) => {
+            const pct = Math.min(100, Math.max(4, ((Number(bar.value) || 0) / maxVal) * 100));
+            return (
+              <div key={idx} className="barChartRow">
+                <div className="barChartTop">
+                  <span className="barChartLabel">
+                    {bar.label} {bar.evidence_id && renderWithCitations(`(${bar.evidence_id})`, evidenceById, sources)}
+                  </span>
+                  <strong className="barChartVal">{bar.display || `${bar.value}${block.unit || ""}`}</strong>
+                </div>
+                <div className="barChartTrack">
+                  <div className="barChartFill" style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 export default function Home() {
   const [text, setText] = useState("");
+  const [mode, setMode] = useState("auto"); // "auto" | "audit_ai"
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [showAllSources, setShowAllSources] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [shuffledPrompts, setShuffledPrompts] = useState(SAMPLE_PROMPTS);
+  const [shuffledPrompts, setShuffledPrompts] = useState(CLAIM_PROMPTS);
   const searchBoxRef = useRef(null);
 
-  function shuffleSuggestions() {
-    const copy = [...SAMPLE_PROMPTS];
+  const activePromptBank = mode === "audit_ai" ? AUDIT_PROMPTS : CLAIM_PROMPTS;
+
+  function shuffleSuggestions(bank = activePromptBank) {
+    const copy = [...bank];
     for (let i = copy.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [copy[i], copy[j]] = [copy[j], copy[i]];
     }
     setShuffledPrompts(copy);
   }
+
+  useEffect(() => {
+    shuffleSuggestions(mode === "audit_ai" ? AUDIT_PROMPTS : CLAIM_PROMPTS);
+  }, [mode]);
 
   useEffect(() => {
     function handleOutsideClick(e) {
@@ -138,7 +248,7 @@ export default function Home() {
     const q = text.trim().toLowerCase();
     if (!q) return shuffledPrompts;
     const matches = shuffledPrompts.filter(item => item.text.toLowerCase().includes(q));
-    return matches.length >= 3
+    return matches.length >= 2
       ? matches
       : [...matches, ...shuffledPrompts.filter(item => !item.text.toLowerCase().includes(q))];
   }, [text, shuffledPrompts]);
@@ -151,6 +261,7 @@ export default function Home() {
     setLoading(true);
     setResult(null);
     setCopied(false);
+    setShowAllSources(false);
 
     try {
       const controller = new AbortController();
@@ -160,7 +271,7 @@ export default function Home() {
         response = await fetch(API + "/api/investigate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: claim }),
+          body: JSON.stringify({ text: claim, mode }),
           signal: controller.signal,
         });
       } finally {
@@ -185,6 +296,10 @@ export default function Home() {
   const sources = result?.sources || [];
   const claimVerdicts = result?.claim_verdicts || [];
   const computedFacts = result?.computed_facts || [];
+  const citationAudits = result?.citation_audits || [];
+  const keyTakeaways = result?.key_takeaways || [];
+  const caveat = result?.caveat || "";
+  const visualBlocks = result?.visual_blocks || [];
 
   const evidenceById = useMemo(() => {
     const map = {};
@@ -212,6 +327,7 @@ export default function Home() {
           reason: e.reason || "",
           stance: String(e.stance || "contextual").toLowerCase(),
           sourceType: e.source_type || matchedSource.source_type || "Web Source",
+          studyTier: e.study_tier || "",
           fullArticleRead: Boolean(e.full_article_read),
           score: e.source_score ?? matchedSource.source_score ?? 0.65,
         };
@@ -230,11 +346,14 @@ export default function Home() {
         reason: "",
         stance: "contextual",
         sourceType: s.source_type || "Web Source",
+        studyTier: "",
         fullArticleRead: false,
         score: s.source_score ?? 0.65,
       };
     });
   }, [evidence, sources]);
+
+  const visibleItems = showAllSources ? unifiedItems : unifiedItems.slice(0, 3);
 
   const supporting = useMemo(
     () => unifiedItems.filter(e => e.stance === "supporting"),
@@ -267,7 +386,7 @@ export default function Home() {
   }, [result, unifiedItems]);
 
   const confidence = Number(result?.confidence || 0);
-  const noResults = result && !result.error && !unifiedItems.length;
+  const noResults = result && !result.error && !unifiedItems.length && !citationAudits.length;
 
   async function copyMarkdownReport() {
     if (!result) return;
@@ -276,7 +395,9 @@ export default function Home() {
       `**Claim:** ${result.claim || text}`,
       `**Verdict:** ${label(result.verdict)} (${confidence}% confidence)`,
       `**Summary:** ${result.explanation}`,
-      `**Evidence:** ${supporting.length} supporting · ${contradicting.length} contradicting · ${contextual.length} contextual (${domains} independent domains)`,
+      ...(keyTakeaways.length ? [``, `## Key Takeaways`, ...keyTakeaways.map(t => `- ${t}`)] : []),
+      ...(caveat ? [``, `> **Caveat:** ${caveat}`] : []),
+      ...(citationAudits.length ? [``, `## Citation Audit`, ...citationAudits.map(c => `- **${c.identifier}**: ${c.status} — ${c.detail}`)] : []),
       ``,
       `## Sources (${unifiedItems.length})`,
       ...unifiedItems.map((item, idx) => `${idx + 1}. [${item.title}](${item.url}) — ${item.publisher}`),
@@ -294,18 +415,33 @@ export default function Home() {
     <main className="appShell">
       <div className="topBar">
         <div className="brandMark"><span className="brandDot" />FACTYGO</div>
-        <span className="topTag">EVIDENCE-FIRST INVESTIGATION</span>
+        <span className="topTag">EVIDENCE-FIRST VERIFICATION & AI AUDITOR</span>
       </div>
 
       <header className="hero">
-        <div className="eyebrow">AI RESEARCH WORKSPACE</div>
-        <h1>Investigate claims.<br /><span>Follow the evidence.</span></h1>
-        <p>Research a claim across the web, inspect the evidence, and see how the conclusion was reached.</p>
+        <div className="eyebrow">AI RESEARCH & AUDIT WORKSPACE</div>
+        <h1>Investigate claims.<br /><span>Audit AI outputs.</span></h1>
+        <p>Verify claims against live primary sources, check symbolic math & timelines, or catch hallucinated DOIs and links in AI-generated text.</p>
       </header>
 
       <section className="searchCard" ref={searchBoxRef}>
         <div className="searchLabelRow">
-          <label htmlFor="claim">What do you want to investigate?</label>
+          <div className="modePills" role="tablist" aria-label="Investigation mode">
+            <button
+              type="button"
+              className={"modePill" + (mode === "auto" ? " active" : "")}
+              onClick={() => setMode("auto")}
+            >
+              Verify Claim
+            </button>
+            <button
+              type="button"
+              className={"modePill" + (mode === "audit_ai" ? " active" : "")}
+              onClick={() => setMode("audit_ai")}
+            >
+              Audit AI Text & Citations
+            </button>
+          </div>
           <span>TEXT INPUT</span>
         </div>
         <div className="inputWrap">
@@ -329,15 +465,19 @@ export default function Home() {
             onKeyDown={e => {
               if ((e.ctrlKey || e.metaKey) && e.key === "Enter") investigate();
             }}
-            placeholder="Write your claim or question..."
+            placeholder={
+              mode === "audit_ai"
+                ? "Paste a ChatGPT/Gemini paragraph with DOIs, PMIDs, arXiv IDs, or URLs to audit..."
+                : "Write your claim or question..."
+            }
             rows={2}
             disabled={loading}
           />
           {showSuggestions && !loading && (
             <div className="suggestionsDropdown" role="listbox" aria-label="Suggested claims and questions">
               <div className="suggestionsHeader">
-                <span>SUGGESTED CLAIMS & QUESTIONS</span>
-                <span>SCROLL FOR MORE</span>
+                <span>{mode === "audit_ai" ? "SAMPLE AI CITATION AUDITS" : "SUGGESTED CLAIMS & QUESTIONS"}</span>
+                <span>CLICK TO FILL</span>
               </div>
               <div className="suggestionsList">
                 {filteredSuggestions.map((item, idx) => (
@@ -359,9 +499,9 @@ export default function Home() {
           )}
         </div>
         <div className="searchFooter">
-          <span className="hint">Attachments are optional · Ctrl/Cmd + Enter to investigate</span>
+          <span className="hint">Ctrl/Cmd + Enter to run · Auto-detects DOIs, PMIDs, arXiv & URLs</span>
           <button className="primaryButton" onClick={() => investigate()} disabled={loading || !text.trim()}>
-            {loading ? <><span className="spinner" /> Researching…</> : <>Investigate <span>→</span></>}
+            {loading ? <><span className="spinner" /> Investigating…</> : <>{mode === "audit_ai" ? "Audit Citations" : "Investigate"} <span>→</span></>}
           </button>
         </div>
       </section>
@@ -397,7 +537,7 @@ export default function Home() {
 
       {result && !result.error && (
         <section className="investigationCard">
-          {/* 1. Unified Hero & Metadata Strip */}
+          {/* 1. Micro-Report Hero & Temporal/Domain Strip */}
           <div className="resultHero">
             <div className="verdictBlock">
               <div className="verdictTopRow">
@@ -419,7 +559,20 @@ export default function Home() {
                 {renderWithCitations(result.explanation, evidenceById, sources)}
               </h2>
 
-              {/* Multi-Claim Breakdown Chips when 2+ sub-claims exist */}
+              {keyTakeaways.length > 0 && (
+                <ul className="takeawayList">
+                  {keyTakeaways.map((item, idx) => (
+                    <li key={idx}>{renderWithCitations(item, evidenceById, sources)}</li>
+                  ))}
+                </ul>
+              )}
+
+              {caveat && (
+                <div className="caveatBanner">
+                  <strong>Caveat:</strong> {renderWithCitations(caveat, evidenceById, sources)}
+                </div>
+              )}
+
               {claimVerdicts.length > 1 && (
                 <div className="subClaimList">
                   {claimVerdicts.map((cv, idx) => (
@@ -435,8 +588,12 @@ export default function Home() {
               )}
 
               <div className="unifiedMetaStrip">
-                <span className="metaPill">Scope: {label(result.claim_analysis?.jurisdiction || "GLOBAL")}</span>
-                <span className="metaPill">Domain: {label(result.claim_analysis?.domain || "GENERAL")}</span>
+                {result.claim_analysis?.valid_as_of && (
+                  <span className="metaPill">Valid As Of: {result.claim_analysis.valid_as_of}</span>
+                )}
+                {result.claim_analysis?.volatility && (
+                  <span className="metaPill">{result.claim_analysis.volatility}</span>
+                )}
                 <span className="metaPill">
                   Mode: {result.claim_analysis?.knowledge_mode === "hybrid_encyclopedic" ? "HYBRID SCIENCE" : "STRICT EVIDENCE"}
                 </span>
@@ -446,7 +603,7 @@ export default function Home() {
               {ratio.total > 0 && (
                 <div className="ratioWrap compactRatio">
                   <div className="ratioLegend">
-                    <span>Evidence Consensus</span>
+                    <span>Evidence Consensus (Adversarial Support vs. Counter-Evidence)</span>
                     <span>
                       {supporting.length} supporting · {contradicting.length} contradicting · {contextual.length} context
                     </span>
@@ -474,11 +631,48 @@ export default function Home() {
             </div>
           </div>
 
-          {/* 2. Unified Clickable Web Sources & Evidence List */}
+          {/* 2. Citation & DOI Hallucination Audit Section (when DOIs/PMIDs/arXiv/URLs are present) */}
+          {citationAudits.length > 0 && (
+            <div className="visualSection">
+              <div className="visualCard">
+                <div className="visualHeader">
+                  <span className="visualBadge">REGISTRY & CITATION HALLUCINATION AUDIT</span>
+                  <h4>Cited Identifiers Checked ({citationAudits.length})</h4>
+                </div>
+                <div className="auditList">
+                  {citationAudits.map((aud, idx) => (
+                    <div key={idx} className="auditRow">
+                      <span className={"subClaimBadge " + verdictTone(aud.status)}>{aud.status}</span>
+                      <div className="auditBody">
+                        <strong>{aud.identifier}</strong> — <span>{aud.title}</span>
+                        <p>{aud.detail}</p>
+                      </div>
+                      {aud.url && (
+                        <a href={aud.url} target="_blank" rel="noreferrer" className="citationPill">
+                          Verify ↗
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 3. Adaptive Visual Blocks (Tables, Timelines, Bar Charts) */}
+          {visualBlocks.length > 0 && (
+            <div className="visualSection">
+              {visualBlocks.map((blk, idx) => (
+                <AdaptiveVisualBlock key={idx} block={blk} evidenceById={evidenceById} sources={sources} />
+              ))}
+            </div>
+          )}
+
+          {/* 4. Progressive-Disclosure Clickable Web Sources & Evidence Pyramid */}
           <div className="unifiedBody">
             <div className="sectionHeaderRow">
               <div>
-                <span className="sectionKicker">VERIFIED WEB SOURCES & EVIDENCE</span>
+                <span className="sectionKicker">VERIFIED WEB SOURCES & EVIDENCE PYRAMID</span>
                 <h3>Web Sources ({unifiedItems.length})</h3>
               </div>
               <span className="clickHint">Click any card to open original source ↗</span>
@@ -492,63 +686,77 @@ export default function Home() {
                 <button className="secondaryButton" onClick={() => investigate()}>Search again</button>
               </div>
             ) : (
-              <div className="cardStack">
-                {unifiedItems.map((item) => {
-                  const faviconUrl = item.domain && item.domain.includes(".")
-                    ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(item.domain)}&sz=32`
-                    : "";
-                  const CardTag = item.url ? "a" : "div";
-                  const linkProps = item.url
-                    ? { href: item.url, target: "_blank", rel: "noreferrer" }
-                    : {};
-                  return (
-                    <CardTag key={item.id} className="unifiedSourceCard" {...linkProps}>
-                      <div className="unifiedCardHeader">
-                        <div className="sourceIdentity">
-                          {faviconUrl ? (
-                            <img
-                              src={faviconUrl}
-                              alt=""
-                              width={18}
-                              height={18}
-                              className="sourceFavicon"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <span className="sourceFaviconFallback">🌐</span>
-                          )}
-                          <div className="sourceTitleBlock">
-                            <span className="unifiedCardTitle">
-                              {item.title} {item.url && <span className="extArrow">↗</span>}
-                            </span>
-                            <span className="unifiedCardPublisher">
-                              {item.publisher}{item.domain && item.publisher.toLowerCase() !== item.domain.toLowerCase() ? ` · ${item.domain}` : ""}
-                            </span>
+              <>
+                <div className="cardStack">
+                  {visibleItems.map((item) => {
+                    const faviconUrl = item.domain && item.domain.includes(".")
+                      ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(item.domain)}&sz=32`
+                      : "";
+                    const CardTag = item.url ? "a" : "div";
+                    const linkProps = item.url
+                      ? { href: item.url, target: "_blank", rel: "noreferrer" }
+                      : {};
+                    return (
+                      <CardTag key={item.id} className="unifiedSourceCard" {...linkProps}>
+                        <div className="unifiedCardHeader">
+                          <div className="sourceIdentity">
+                            {faviconUrl ? (
+                              <img
+                                src={faviconUrl}
+                                alt=""
+                                width={18}
+                                height={18}
+                                className="sourceFavicon"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <span className="sourceFaviconFallback">🌐</span>
+                            )}
+                            <div className="sourceTitleBlock">
+                              <span className="unifiedCardTitle">
+                                {item.title} {item.url && <span className="extArrow">↗</span>}
+                              </span>
+                              <span className="unifiedCardPublisher">
+                                {item.publisher}{item.domain && item.publisher.toLowerCase() !== item.domain.toLowerCase() ? ` · ${item.domain}` : ""}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="pillGroup">
+                            <span className="idBadge">{item.id}</span>
+                            <span className={"stance " + item.stance}>{label(item.stance)}</span>
+                            {item.fullArticleRead && <span className="deepReadPill">Full Article</span>}
+                            {item.studyTier && <span className="studyTierPill">{item.studyTier}</span>}
+                            <span className="metaPill">{Math.round(Number(item.score) * 100)}/100</span>
                           </div>
                         </div>
 
-                        <div className="pillGroup">
-                          <span className="idBadge">{item.id}</span>
-                          <span className={"stance " + item.stance}>{label(item.stance)}</span>
-                          {item.fullArticleRead && <span className="deepReadPill">Full Article</span>}
-                          <span className="authorityPill">{item.sourceType}</span>
-                          <span className="metaPill">{Math.round(Number(item.score) * 100)}/100</span>
-                        </div>
-                      </div>
+                        {item.excerpt && (
+                          <p className="unifiedExcerpt">“{item.excerpt}”</p>
+                        )}
+                        {item.reason && (
+                          <p className="unifiedReason">{item.reason}</p>
+                        )}
+                      </CardTag>
+                    );
+                  })}
+                </div>
 
-                      {item.excerpt && (
-                        <p className="unifiedExcerpt">“{item.excerpt}”</p>
-                      )}
-                      {item.reason && (
-                        <p className="unifiedReason">{item.reason}</p>
-                      )}
-                    </CardTag>
-                  );
-                })}
-              </div>
+                {unifiedItems.length > 3 && (
+                  <button
+                    type="button"
+                    className="showMoreSourcesBtn"
+                    onClick={() => setShowAllSources(prev => !prev)}
+                  >
+                    {showAllSources
+                      ? "Show fewer sources ▲"
+                      : `Show all ${unifiedItems.length} sources (+${unifiedItems.length - 3} more) ▼`}
+                  </button>
+                )}
+              </>
             )}
 
-            {/* 3. Collapsible Research Queries, Symbolic Logic & Methodology Drawer */}
+            {/* 5. Collapsible Research Queries, Symbolic Logic & Methodology Drawer */}
             <details className="researchDrawer">
               <summary>
                 <span>Research queries, symbolic logic & methodology ({(result.research_questions || []).length} queries)</span>
@@ -561,7 +769,7 @@ export default function Home() {
 
                 {computedFacts.length > 0 && (
                   <div className="drawerLogicBox">
-                    <strong>Deterministic Symbolic & Temporal Checks</strong>
+                    <strong>Deterministic Symbolic, Unit & Temporal Checks</strong>
                     <ul>
                       {computedFacts.map((fact, idx) => (
                         <li key={idx}>{fact}</li>
@@ -597,7 +805,7 @@ export default function Home() {
       )}
 
       <footer className="footer">
-        FACTYGO · Evidence-first AI investigation · Evidence over assumption
+        FACTYGO · Evidence-first AI verification & citation auditor · Evidence over assumption
       </footer>
     </main>
   );

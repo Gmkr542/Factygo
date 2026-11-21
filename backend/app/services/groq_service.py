@@ -12,7 +12,7 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are the verification and synthesis engine for Factygo, a neutral evidence-first fact-checking platform. Use retrieved evidence and verified symbolic/math computations for factual conclusions. Never invent sources, URLs, quotations, statistics, or evidence IDs. Return ONLY valid JSON."""
+SYSTEM_PROMPT = """You are the verification, citation-auditing, and synthesis engine for Factygo, an evidence-first fact-checking platform. Use retrieved evidence, verified DOI/PubMed checks, and deterministic symbolic/math computations for factual conclusions. Never invent sources, URLs, numbers, or quotes. Return ONLY valid JSON."""
 
 _model_cache: tuple[float, set[str]] | None = None
 MODEL_CACHE_SECONDS = 300
@@ -232,6 +232,7 @@ async def synthesize_investigation(
     questions: list[str],
     evidence_pool: list[dict],
     computed_facts: list[str] | None = None,
+    citation_audits: list[dict] | None = None,
     knowledge_mode: str = "strict_closed_book",
 ) -> dict:
     compact = [
@@ -249,16 +250,18 @@ async def synthesize_investigation(
     ]
 
     grounding_rule = (
-        "HYBRID ENCYCLOPEDIC MODE: This is a settled scientific/physical fundamental claim. Anchor your verdict in the retrieved evidence (E01..E05) AND verified textbook physics/astronomy principles (e.g. Rayleigh scattering, optics) when snippets are brief, citing retrieved sources wherever applicable."
+        "HYBRID ENCYCLOPEDIC MODE: This is a settled scientific/physical fundamental claim. Anchor your verdict in retrieved evidence (E01..E05) AND verified textbook physics/astronomy principles (e.g. Rayleigh scattering, optics) when snippets are brief, citing retrieved sources wherever applicable."
         if knowledge_mode == "hybrid_encyclopedic"
-        else "STRICT CLOSED-BOOK MODE: Base your verdict strictly on the retrieved evidence (E01..E05) and deterministic COMPUTED FACTS below. If evidence is insufficient, return UNVERIFIED."
+        else "STRICT CLOSED-BOOK MODE: Base your verdict strictly on retrieved evidence (E01..E05), CITATION AUDIT RESULTS, and deterministic COMPUTED FACTS below. If evidence is insufficient, return UNVERIFIED."
     )
 
-    prompt = f"""Evaluate the claim using the evidence and verified deterministic computations below. Never invent sources, URLs, or quotes.
-CLAIM: {claim!r}
+    prompt = f"""Evaluate the claim or AI-generated passage using the evidence, citation audit results, and deterministic computations below. Never invent sources, URLs, numbers, or quotes.
+INPUT: {claim!r}
 SUB-CLAIMS TO CHECK: {json.dumps(subclaims, ensure_ascii=False)}
 RESEARCH QUESTIONS: {json.dumps(questions, ensure_ascii=False)}
-DETERMINISTIC COMPUTED FACTS (Ground-truth math & temporal logic):
+CITATION & DOI AUDIT RESULTS:
+{json.dumps(citation_audits or [], ensure_ascii=False)}
+DETERMINISTIC COMPUTED FACTS:
 {json.dumps(computed_facts or [], ensure_ascii=False)}
 RETRIEVED EVIDENCE:
 {json.dumps(compact, ensure_ascii=False)}
@@ -266,20 +269,29 @@ RETRIEVED EVIDENCE:
 {grounding_rule}
 
 Rules:
-1. Choose overall verdict from: TRUE, MOSTLY TRUE, PARTLY TRUE, MISLEADING, MOSTLY FALSE, FALSE, UNVERIFIED.
+1. Choose overall verdict from: TRUE, MOSTLY TRUE, PARTLY TRUE, MISLEADING, MOSTLY FALSE, FALSE, UNVERIFIED. (If CITATION AUDIT RESULTS show HALLUCINATED DOIs/PMIDs, mark FALSE or MISLEADING).
 2. Compute integer confidence (0-100) based on evidence quality, directness, and independent corroboration.
-3. Write "explanation" in 1-2 short, direct sentences (under 55 words total) starting strictly with:
+3. Write "explanation" in 1-2 short, direct sentences (under 50 words total) starting strictly with:
    Result : <Title-case Verdict>, <direct factual statement answering or correcting the claim immediately with specific scientific/technical facts and inline evidence IDs like (E01)>.
    - NEVER use filler phrases like "The claim that...", "Multiple sources indicate...", "Available evidence shows...", or "making the claim false". State the facts directly.
-4. Evaluate each sub-claim in SUB-CLAIMS TO CHECK inside "claim_verdicts" with verdict ("TRUE"|"FALSE"|"PARTLY TRUE"|"UNVERIFIED") and evidence_id ("E01" or "").
-5. For each evidence item you use, classify stance as "supporting", "contradicting", or "contextual" with a concise 1-sentence reason and strength (0.0 to 1.0).
-6. Provide a concise answer for each research question grounded strictly in the evidence IDs.
+4. Provide 2-3 concise, high-signal "key_takeaways" (12-22 words each) summarizing concrete findings with evidence IDs like (E01).
+5. Provide "caveat" (1 short sentence, or empty string "") ONLY if retrieved evidence has limitations (e.g., preliminary animal studies, missing exact figures, or regional scope).
+6. OPTIONAL CONTEXTUAL VISUAL BLOCK ("visual_blocks"): Include at most 1 visual block ONLY if retrieved evidence genuinely supports a structured comparison, timeline, or verified numeric chart—otherwise return []:
+   - Comparison table: {{"type": "table", "title": "string", "headers": ["Aspect", "Claimed", "Verified Evidence"], "rows": [["...", "...", "... (E01)"]]}}
+   - Chronological timeline: {{"type": "timeline", "title": "string", "events": [{{"date": "2023", "label": "Event description", "evidence_id": "E01"}}]}}
+   - Quantitative bar chart (ONLY when exact numbers appear in evidence/computed facts): {{"type": "bar_chart", "title": "string", "unit": "%", "bars": [{{"label": "Category", "value": 75, "display": "75%", "evidence_id": "E01"}}]}}
+7. Evaluate each sub-claim in SUB-CLAIMS TO CHECK inside "claim_verdicts" with verdict ("TRUE"|"FALSE"|"PARTLY TRUE"|"UNVERIFIED") and evidence_id ("E01" or "").
+8. For each evidence item you use, classify stance as "supporting", "contradicting", or "contextual" with a concise 1-sentence reason and strength (0.0 to 1.0).
+9. Provide a concise answer for each research question grounded strictly in the evidence IDs.
 
 Return ONLY valid JSON:
 {{
   "verdict": "TRUE|MOSTLY TRUE|PARTLY TRUE|MISLEADING|MOSTLY FALSE|FALSE|UNVERIFIED",
   "confidence": 0,
   "explanation": "Result : False, ...",
+  "key_takeaways": ["Concrete fact 1 (E01)", "Concrete fact 2 (E02)"],
+  "caveat": "Optional limitation note or empty string",
+  "visual_blocks": [],
   "claim_verdicts": [
     {{"subclaim": "string", "verdict": "TRUE|FALSE|PARTLY TRUE|UNVERIFIED", "evidence_id": "E01"}}
   ],

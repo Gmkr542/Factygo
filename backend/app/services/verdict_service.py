@@ -18,8 +18,8 @@ class VerdictService:
                 },
             }
 
-        supporting = [e for e in evidence if e.get("stance") == "supporting"]
-        contradicting = [e for e in evidence if e.get("stance") == "contradicting"]
+        supporting = [e for e in evidence if e.get("stance") == "supporting" and e.get("jurisdiction_match", True)]
+        contradicting = [e for e in evidence if e.get("stance") == "contradicting" and e.get("jurisdiction_match", True)]
         domains = {
             (e.get("domain") or urlparse(e.get("source_url", "")).netloc).lower().removeprefix("www.")
             for e in evidence
@@ -27,23 +27,23 @@ class VerdictService:
         }
         domains.discard("")
 
-        sup_weight = sum(e.get("strength", 0.5) for e in supporting)
-        con_weight = sum(e.get("strength", 0.5) for e in contradicting)
+        sup_weight = sum(e.get("strength", 0.5) * e.get("source_score", 0.7) for e in supporting)
+        con_weight = sum(e.get("strength", 0.5) * e.get("source_score", 0.7) for e in contradicting)
 
         if sup_weight > 0 and con_weight == 0:
-            verdict = "MOSTLY TRUE" if len(supporting) >= 2 else "PARTLY TRUE"
-            confidence = min(85, int(45 + sup_weight * 15))
+            verdict = "TRUE" if sup_weight >= 1.5 and len(supporting) >= 2 else ("MOSTLY TRUE" if len(supporting) >= 2 else "PARTLY TRUE")
+            confidence = min(92, int(55 + sup_weight * 18))
             explanation = f"Retrieved evidence from {len(domains)} independent domain(s) supports the claim without direct contradiction."
         elif con_weight > 0 and sup_weight == 0:
-            verdict = "MOSTLY FALSE" if len(contradicting) >= 2 else "MISLEADING"
-            confidence = min(85, int(45 + con_weight * 15))
+            verdict = "FALSE" if con_weight >= 1.5 and len(contradicting) >= 2 else ("MOSTLY FALSE" if len(contradicting) >= 2 else "MISLEADING")
+            confidence = min(92, int(55 + con_weight * 18))
             explanation = f"Retrieved evidence from {len(domains)} independent domain(s) contradicts the claim."
         elif sup_weight > 0 and con_weight > 0:
             verdict = "PARTLY TRUE"
             confidence = min(75, int(40 + abs(sup_weight - con_weight) * 10))
             explanation = "Retrieved sources show mixed findings with both supporting evidence and caveats."
         else:
-            verdict = "UNVERIFIED"
+            verdict = "INSUFFICIENT_EVIDENCE"
             confidence = min(45, 15 + len(evidence) * 5)
             explanation = "Related sources were retrieved, but none directly confirmed or refuted the specific claim."
 

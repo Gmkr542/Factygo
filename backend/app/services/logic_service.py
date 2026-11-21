@@ -15,6 +15,16 @@ _OPS = {
     ast.USub: op.neg,
 }
 
+_UNIT_CONVERSIONS = [
+    (r"(\d+(?:\.\d+)?)\s*crores?\b", lambda v: f"{v:g} crore = {v * 10_000_000:,.0f} ({v / 100:g} billion)"),
+    (r"(\d+(?:\.\d+)?)\s*lakhs?\b", lambda v: f"{v:g} lakh = {v * 100_000:,.0f}"),
+    (r"(\d+(?:\.\d+)?)\s*mph\b", lambda v: f"{v:g} mph = {v * 1.60934:.2f} km/h"),
+    (r"(\d+(?:\.\d+)?)\s*km/h\b", lambda v: f"{v:g} km/h = {v / 1.60934:.2f} mph"),
+    (r"(-?\d+(?:\.\d+)?)\s*°?\s*f\b", lambda v: f"{v:g}°F = {(v - 32) * 5 / 9:.2f}°C"),
+    (r"(-?\d+(?:\.\d+)?)\s*°?\s*c\b", lambda v: f"{v:g}°C = {(v * 9 / 5) + 32:.2f}°F"),
+    (r"(\d+(?:\.\d+)?)\s*miles?\b", lambda v: f"{v:g} miles = {v * 1.60934:.2f} km"),
+]
+
 
 def _safe_eval_expr(expr: str) -> float | None:
     try:
@@ -36,7 +46,7 @@ def _safe_eval_expr(expr: str) -> float | None:
 
 
 class LogicService:
-    """Deterministic symbolic, temporal, and arithmetic verification unit."""
+    """Deterministic symbolic, temporal, arithmetic, and unit-normalization unit."""
 
     @classmethod
     def analyze(cls, claim: str, documents: list[dict]) -> list[str]:
@@ -45,7 +55,7 @@ class LogicService:
         current_year = now.year
         facts.append(f"CURRENT_DATE_UTC: {now.strftime('%Y-%m-%d')} (Year {current_year})")
 
-        # 1. Temporal duration & chronological checks on years in claim + evidence
+        # 1. Temporal duration & chronological checks
         claim_years = sorted({int(y) for y in re.findall(r"\b(19\d{2}|20\d{2})\b", claim)})
         if len(claim_years) >= 2:
             span = claim_years[-1] - claim_years[0]
@@ -59,7 +69,7 @@ class LogicService:
             else:
                 facts.append(f"TEMPORAL_DELTA: Year {y} is the current year ({current_year}).")
 
-        # 2. Explicit arithmetic expressions in claim (e.g., "25% of 400", "10 + 15 = 30")
+        # 2. Arithmetic & percentage checks
         eq_match = re.search(r"(\d+(?:\.\d+)?\s*[+\-*/]\s*\d+(?:\.\d+)?)\s*=\s*(\d+(?:\.\d+)?)", claim)
         if eq_match:
             computed = _safe_eval_expr(eq_match.group(1))
@@ -77,7 +87,18 @@ class LogicService:
             res = round((pct / 100.0) * base, 4)
             facts.append(f"PERCENTAGE_COMPUTATION: {pct:g}% of {base:g} = {res:g}.")
 
-        # 3. Cross-evidence year & numerical extraction
+        # 3. Unit & Scale Normalization (crores/lakhs, mph/kmh, °C/°F, miles/km)
+        combined_text = claim + " " + " ".join(str(d.get("content", ""))[:400] for d in documents[:3])
+        for pattern, formatter in _UNIT_CONVERSIONS:
+            m = re.search(pattern, combined_text, flags=re.I)
+            if m:
+                try:
+                    val = float(m.group(1))
+                    facts.append(f"UNIT_NORMALIZATION: {formatter(val)}")
+                except ValueError:
+                    pass
+
+        # 4. Cross-evidence years
         ev_years: set[int] = set()
         for doc in documents[:5]:
             blob = f"{doc.get('title', '')} {doc.get('content', '')}"
@@ -86,4 +107,4 @@ class LogicService:
         if ev_years:
             facts.append(f"EVIDENCE_YEARS_MENTIONED: {sorted(ev_years)}")
 
-        return facts[:8]
+        return facts[:10]

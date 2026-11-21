@@ -13,7 +13,7 @@ router = APIRouter()
 async def run_investigation(req: InvestigateRequest):
     raw_input = req.resolved_text()
     if not raw_input:
-        raise HTTPException(status_code=400, detail="Please provide a claim, question, or URL to investigate.")
+        raise HTTPException(status_code=400, detail="Please provide a claim, question, AI passage, or URL to investigate.")
 
     if raw_input.startswith(("http://", "https://")) and " " not in raw_input:
         try:
@@ -23,7 +23,7 @@ async def run_investigation(req: InvestigateRequest):
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
-        return await investigate_async(raw_input)
+        return await investigate_async(raw_input, mode=req.mode or "auto")
     except GroqPayloadTooLargeError as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     except GroqRateLimitError as exc:

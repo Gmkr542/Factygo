@@ -11,8 +11,8 @@ configure_logging()
 
 app = FastAPI(
     title="Factygo API",
-    description="Evidence-first AI investigation platform",
-    version="2.0.0",
+    description="Evidence-first AI verification & citation audit platform",
+    version="3.0.0",
 )
 
 origins = [x.strip() for x in settings.cors_origins.split(",") if x.strip()]
@@ -38,6 +38,6 @@ def root():
     return {
         "name": "Factygo",
         "status": "running",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "docs": "/docs",
     }

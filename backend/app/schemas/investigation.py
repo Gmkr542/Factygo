@@ -8,7 +8,7 @@ class InvestigateRequest(BaseModel):
     text: str | None = None
     query: str | None = None
     url: str | None = None
-    mode: str = "auto"
+    mode: str = "auto"  # "auto" | "claim" | "audit_ai"
 
     def resolved_text(self) -> str:
         return (self.claim or self.text or self.query or self.url or "").strip()
@@ -31,12 +31,17 @@ class ResearchQuestion(BaseModel):
 
 class InvestigationResponse(BaseModel):
     claim: str
+    mode_used: str = "claim"
     claims: list[Claim] = Field(default_factory=list)
     claim_verdicts: list[dict[str, Any]] = Field(default_factory=list)
     computed_facts: list[str] = Field(default_factory=list)
+    citation_audits: list[dict[str, Any]] = Field(default_factory=list)
     verdict: str = "UNVERIFIED"
     confidence: int = 0
     explanation: str = ""
+    key_takeaways: list[str] = Field(default_factory=list)
+    caveat: str = ""
+    visual_blocks: list[dict[str, Any]] = Field(default_factory=list)
     evidence: list[dict[str, Any]] = Field(default_factory=list)
     sources: list[dict[str, Any]] = Field(default_factory=list)
     status: str = "complete"

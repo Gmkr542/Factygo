@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from app.core.config import get_settings
 from app.schemas.investigation import InvestigationResponse, ResearchQuestion
 from app.services.article_parser import fetch_article
+from app.services.citation_auditor import CitationAuditor
 from app.services.claim_intelligence import ClaimIntelligence
 from app.services.claim_service import decompose_claim
 from app.services.evidence_service import EvidenceService
@@ -69,6 +70,58 @@ def _format_quick_report(verdict: str, claim: str, raw_text: str) -> str:
     return f"Result : {title_verdict}, {cleaned}"
 
 
+def _sanitize_visual_blocks(raw_blocks) -> list[dict]:
+    if not isinstance(raw_blocks, list):
+        return []
+    clean_blocks: list[dict] = []
+    for blk in raw_blocks[:3]:
+        if not isinstance(blk, dict):
+            continue
+        btype = str(blk.get("type", "")).lower().strip()
+        title = str(blk.get("title", "")).strip()[:120]
+        if btype == "table":
+            headers = [str(h).strip()[:60] for h in blk.get("headers", []) if str(h).strip()][:5]
+            rows = []
+            for r in blk.get("rows", [])[:6]:
+                if isinstance(r, list) and any(str(c).strip() for c in r):
+                    rows.append([str(c).strip()[:180] for c in r[:len(headers) or 5]])
+            if headers and rows:
+                clean_blocks.append({"type": "table", "title": title or "Comparison", "headers": headers, "rows": rows})
+        elif btype == "timeline":
+            events = []
+            for ev in blk.get("events", [])[:6]:
+                if isinstance(ev, dict) and str(ev.get("label", "")).strip():
+                    events.append({
+                        "date": str(ev.get("date", "")).strip()[:40],
+                        "label": str(ev.get("label", "")).strip()[:200],
+                        "evidence_id": str(ev.get("evidence_id", "")).strip()[:10],
+                    })
+            if len(events) >= 2:
+                clean_blocks.append({"type": "timeline", "title": title or "Timeline", "events": events})
+        elif btype == "bar_chart":
+            bars = []
+            for bar in blk.get("bars", [])[:6]:
+                if isinstance(bar, dict) and str(bar.get("label", "")).strip():
+                    try:
+                        val = float(bar.get("value", 0))
+                    except (TypeError, ValueError):
+                        continue
+                    bars.append({
+                        "label": str(bar.get("label", "")).strip()[:60],
+                        "value": max(0.0, val),
+                        "display": str(bar.get("display", f"{val:g}")).strip()[:30],
+                        "evidence_id": str(bar.get("evidence_id", "")).strip()[:10],
+                    })
+            if len(bars) >= 2:
+                clean_blocks.append({
+                    "type": "bar_chart",
+                    "title": title or "Quantitative Breakdown",
+                    "unit": str(blk.get("unit", "")).strip()[:16],
+                    "bars": bars,
+                })
+    return clean_blocks
+
+
 def _compute_analysis(evidence: list[dict], base_analysis: dict | None = None) -> dict:
     analysis = dict(base_analysis or {})
     supporting = [e for e in evidence if str(e.get("stance", "")).lower() == "supporting"]
@@ -91,8 +144,7 @@ def _deterministic_resource_plan(claim_analysis: dict) -> dict:
     return {"preferred_domains": domains} if domains else {}
 
 
-async def _enrich_top_articles(documents: list[dict], claim: str) -> None:
-    """Upgrade #2: Deep-read the top 2 non-redirect HTML sources for full context & caveats."""
+async def _enrich_top_articles(documents: list[dict]) -> None:
     targets = [
         doc for doc in documents[:3]
         if doc.get("url", "").startswith(("http://", "https://"))
@@ -117,8 +169,8 @@ async def _enrich_top_articles(documents: list[dict], claim: str) -> None:
     await asyncio.gather(*[_fetch_one(d) for d in targets], return_exceptions=True)
 
 
-async def investigate_async(text: str) -> InvestigationResponse:
-    cache_key = " ".join(text.strip().lower().split())
+async def investigate_async(text: str, mode: str = "auto") -> InvestigationResponse:
+    cache_key = f"{mode}:{' '.join(text.strip().lower().split())}"
     now = time.monotonic()
     cached = _INVESTIGATION_CACHE.get(cache_key)
     if cached and (now - cached[0]) < _CACHE_TTL_SECONDS:
@@ -128,15 +180,23 @@ async def investigate_async(text: str) -> InvestigationResponse:
     claim_analysis = ClaimIntelligence.analyze(text)
     use_ai = bool(settings.groq_api_key and settings.groq_api_key.strip())
 
-    # 1. Deterministic atomic claim decomposition, question framing & hybrid routing
+    # Detect if input contains explicit DOIs, PMIDs, arXiv IDs, or URLs to audit
+    detected_cits = CitationAuditor.detect_citations(text)
+    has_citations = any(detected_cits.values())
+    resolved_mode = "audit_ai" if (mode == "audit_ai" or (mode == "auto" and has_citations)) else "claim"
+
     claims = decompose_claim(text)
     subclaim_texts = [c.text for c in claims]
     questions = QuestionService.frame(text, claim_analysis)[:2]
     resource_plan = _deterministic_resource_plan(claim_analysis)
 
-    # 2. Concurrent multi-provider web search (DDGS + Google News RSS + PubMed + Wikipedia)
+    # Run Citation/DOI Audit concurrently with multi-provider web retrieval
+    audit_task = CitationAuditor.audit_text(text) if has_citations else asyncio.sleep(0, result=[])
     search_tasks = [search_web(q, max_results=5, resource_plan=resource_plan) for q in questions]
-    batch_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+    gathered = await asyncio.gather(audit_task, *search_tasks, return_exceptions=True)
+
+    citation_audits = gathered[0] if isinstance(gathered[0], list) else []
+    batch_results = gathered[1:]
 
     documents: list[dict] = []
     seen_urls: set[str] = set()
@@ -157,6 +217,22 @@ async def investigate_async(text: str) -> InvestigationResponse:
                 enriched["research_question"] = question
                 documents.append(enriched)
 
+    # Confidence-Triggered Iterative Search: if top relevance is weak (<55), run a focused keyword pass
+    top_rel = max((d.get("relevance_score", 0) for d in documents), default=0)
+    if len(documents) < 2 or top_rel < 55:
+        retry_q = f"{claim_analysis.get('subject', '')} {text[:90]}".strip()
+        try:
+            retry_docs = await search_web(retry_q, max_results=4)
+            for doc in retry_docs:
+                url = doc.get("url", "")
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    enriched = dict(doc)
+                    enriched["research_question"] = retry_q
+                    documents.append(enriched)
+        except Exception:
+            pass
+
     documents.sort(
         key=lambda x: (x.get("relevance_score", 0), x.get("source_quality", 0)),
         reverse=True,
@@ -165,13 +241,11 @@ async def investigate_async(text: str) -> InvestigationResponse:
     for i, doc in enumerate(documents, start=1):
         doc["evidence_id"] = f"E{i:02d}"
 
-    # 3. Full-Article Deep Reading (top 2 URLs) + Symbolic Math/Date Logic Verification
-    await _enrich_top_articles(documents, text)
+    await _enrich_top_articles(documents)
     computed_facts = LogicService.analyze(text, documents)
 
-    # 4. Single-call Groq synthesis with deterministic fallback
     llm_synthesis: dict = {}
-    if use_ai and documents:
+    if use_ai and (documents or citation_audits):
         try:
             llm_synthesis = await synthesize_investigation(
                 text,
@@ -179,6 +253,7 @@ async def investigate_async(text: str) -> InvestigationResponse:
                 questions=questions,
                 evidence_pool=documents,
                 computed_facts=computed_facts,
+                citation_audits=citation_audits,
                 knowledge_mode=claim_analysis.get("knowledge_mode", "strict_closed_book"),
             )
         except Exception as exc:
@@ -197,6 +272,10 @@ async def investigate_async(text: str) -> InvestigationResponse:
             ev["domain"] = doc_domain_by_url.get(ev["source_url"], "")
 
     claim_verdicts: list[dict] = []
+    key_takeaways: list[str] = []
+    caveat = ""
+    visual_blocks: list[dict] = []
+
     if llm_synthesis and llm_synthesis.get("verdict"):
         verdict_label = str(llm_synthesis["verdict"]).upper()
         try:
@@ -206,6 +285,13 @@ async def investigate_async(text: str) -> InvestigationResponse:
         explanation = _format_quick_report(verdict_label, text, str(llm_synthesis.get("explanation") or ""))
         raw_analysis = llm_synthesis.get("analysis") if isinstance(llm_synthesis.get("analysis"), dict) else {}
         evidence_analysis = _compute_analysis(evidence, raw_analysis)
+
+        raw_kt = llm_synthesis.get("key_takeaways")
+        if isinstance(raw_kt, list):
+            key_takeaways = [str(x).strip() for x in raw_kt if str(x).strip()][:3]
+        caveat = str(llm_synthesis.get("caveat") or "").strip()[:240]
+        visual_blocks = _sanitize_visual_blocks(llm_synthesis.get("visual_blocks"))
+
         raw_cv = llm_synthesis.get("claim_verdicts")
         if isinstance(raw_cv, list):
             claim_verdicts = [
@@ -217,12 +303,28 @@ async def investigate_async(text: str) -> InvestigationResponse:
                 for x in raw_cv
                 if isinstance(x, dict) and str(x.get("subclaim", "")).strip()
             ][:4]
+    elif citation_audits and any(a.get("status") == "HALLUCINATED" for a in citation_audits):
+        verdict_label = "FALSE"
+        confidence = 95
+        bad = [a["identifier"] for a in citation_audits if a.get("status") == "HALLUCINATED"]
+        explanation = _format_quick_report(
+            verdict_label,
+            text,
+            f"Audited citations {', '.join(bad)} do not exist in CrossRef/PubMed/arXiv registries.",
+        )
+        evidence_analysis = _compute_analysis(evidence)
     else:
         verdict_data = VerdictService().evaluate(text, evidence)
         verdict_label = verdict_data["verdict"]
         confidence = verdict_data["confidence"]
         explanation = _format_quick_report(verdict_label, text, verdict_data["explanation"])
         evidence_analysis = _compute_analysis(evidence, verdict_data["analysis"])
+
+    # Auto-inject Evidence Pyramid warning if health claim relies solely on Tier 3 (Preclinical/Animal) studies
+    if not caveat and claim_analysis.get("domain") == "health_science" and evidence:
+        ranks = [e.get("study_tier_rank", 4) for e in evidence]
+        if 3 in ranks and 1 not in ranks and 2 not in ranks:
+            caveat = "Retrieved scientific evidence relies on preclinical/animal studies rather than human randomized clinical trials."
 
     ai_q_answers = {
         str(item.get("question", "")).strip().lower(): str(item.get("answer", "")).strip()
@@ -247,28 +349,33 @@ async def investigate_async(text: str) -> InvestigationResponse:
 
     response = InvestigationResponse(
         claim=text,
+        mode_used=resolved_mode,
         claims=claims,
         claim_verdicts=claim_verdicts,
         computed_facts=computed_facts,
+        citation_audits=citation_audits,
         verdict=verdict_label,
         confidence=confidence,
         explanation=explanation,
+        key_takeaways=key_takeaways,
+        caveat=caveat,
+        visual_blocks=visual_blocks,
         evidence=evidence,
         sources=researcher.normalize(documents),
-        status="complete" if documents else "no_results",
+        status="complete" if (documents or citation_audits) else "no_results",
         methodology=[
-            "Atomic claim decomposition & hybrid knowledge-mode routing",
-            "Concurrent multi-provider retrieval (PubMed, Wikipedia, Google News RSS, DDGS)",
-            "SSRF-safe full-article deep reading for top authoritative sources",
-            "Deterministic symbolic math & temporal logic verification",
-            "Evidence-grounded AI synthesis with TTL caching",
+            "Atomic sub-claim decomposition & adversarial support/counter-evidence query split",
+            "Concurrent multi-provider retrieval (PubMed, Wikipedia, Google News RSS, DDGS) with syndication deduplication",
+            "Live DOI / PubMed / arXiv / URL citation hallucination audit",
+            "SSRF-safe full-article deep reading & Evidence Pyramid tiering",
+            "Deterministic symbolic math, unit normalization & temporal logic verification",
         ],
         claim_analysis=claim_analysis,
         evidence_analysis=evidence_analysis,
         research_questions=question_models,
     )
 
-    if documents:
+    if documents or citation_audits:
         if len(_INVESTIGATION_CACHE) >= 200:
             _INVESTIGATION_CACHE.pop(next(iter(_INVESTIGATION_CACHE)))
         _INVESTIGATION_CACHE[cache_key] = (now, response)
