@@ -441,20 +441,33 @@ export default function Home() {
             <div
               className={
                 "quotaBadge " +
-                (quota.available_pct >= 50 ? "high" : quota.available_pct >= 20 ? "med" : "low")
+                (quota.daily_available_pct > 25 ? "high" : quota.daily_available_pct > 10 ? "med" : "low")
               }
               title={
-                quota.remaining_tokens != null && quota.limit_tokens != null
-                  ? `Model: ${quota.model} · Tokens: ${quota.remaining_tokens.toLocaleString()} / ${quota.limit_tokens.toLocaleString()} remaining (auto-updates every 15s)`
-                  : `Model: ${quota.model} · Auto-updates every 15s`
+                `Model: ${quota.model} (${quota.utc_date} UTC)\n` +
+                `• Daily Requests (RPD): ${quota.remaining_requests_rpd?.toLocaleString()} / ${quota.limit_requests_rpd?.toLocaleString()} (${quota.rpd_available_pct}%)\n` +
+                `• Daily Tokens (TPD): ${quota.remaining_tokens_tpd?.toLocaleString()} / ${quota.limit_tokens_tpd?.toLocaleString()} (${quota.tpd_available_pct}%)\n` +
+                `• Per-Minute Speed (TPM): ${quota.tpm_available_pct}% available`
               }
             >
               <span className="quotaPulse" />
-              <span>AI Quota: <strong>{quota.available_pct}%</strong></span>
+              <span>
+                Daily Quota: <strong>{quota.daily_available_pct}%</strong>
+                {quota.remaining_requests_rpd != null && (
+                  <small className="quotaSub"> ({quota.remaining_requests_rpd} RPD)</small>
+                )}
+              </span>
             </div>
           )}
         </div>
       </div>
+
+      {quota?.alert_message && (
+        <div className={"quotaAlertBanner " + quota.alert_level} role="alert">
+          <strong>{quota.alert_level === "critical" ? "⚠ DAILY QUOTA CRITICAL:" : "⚠ QUOTA ALERT:"}</strong>{" "}
+          <span>{quota.alert_message}</span>
+        </div>
+      )}
 
       <header className="hero">
         <div className="eyebrow">AI RESEARCH & AUDIT WORKSPACE</div>
