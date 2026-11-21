@@ -39,10 +39,14 @@ _QUOTA_STATE: dict = {
 
 
 def _daily_db_conn():
+    import os
     import sqlite3
     s = get_settings()
     db_path = s.database_url.replace("sqlite:///", "") if s.database_url.startswith("sqlite:///") else "factygo.db"
-    conn = sqlite3.connect(db_path)
+    try:
+        conn = sqlite3.connect(db_path)
+    except Exception:
+        conn = sqlite3.connect(os.path.join("/tmp", "factygo.db"))
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS daily_quota_usage (
