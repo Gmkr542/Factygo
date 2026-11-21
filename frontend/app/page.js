@@ -434,37 +434,41 @@ export default function Home() {
   return (
     <main className="appShell">
       <div className="topBar">
-        <div className="brandMark"><span className="brandDot" />FACTYGO</div>
-        <div className="topRightCluster">
-          <span className="topTag">EVIDENCE-FIRST VERIFICATION</span>
-          {quota && (
-            <div className="quotaStack">
-              <div
-                className={
-                  "quotaBadge " +
-                  (quota.daily_available_pct > 25 ? "high" : quota.daily_available_pct > 10 ? "med" : "low")
-                }
-                title={
-                  `Model: ${quota.model} (${quota.utc_date} UTC)\n` +
-                  `• Daily Requests (RPD): ${quota.remaining_requests_rpd?.toLocaleString()} / ${quota.limit_requests_rpd?.toLocaleString()} (${quota.rpd_available_pct}%)\n` +
-                  `• Daily Tokens (TPD): ${quota.remaining_tokens_tpd?.toLocaleString()} / ${quota.limit_tokens_tpd?.toLocaleString()} (${quota.tpd_available_pct}%)\n` +
-                  `• Per-Minute Speed (TPM): ${quota.tpm_available_pct}% available`
-                }
-              >
-                <span className="quotaPulse" />
-                <span>
-                  Daily Quota: <strong>{quota.daily_available_pct}%</strong>
-                  {quota.remaining_requests_rpd != null && (
-                    <small className="quotaSub"> ({quota.remaining_requests_rpd} RPD)</small>
-                  )}
-                </span>
-              </div>
-              <div className="quotaSubRow">
-                {quota.rpd_used_pct}% / {quota.reset_in_minutes} min
-              </div>
-            </div>
-          )}
+        <div className="brandGroup">
+          <div className="brandMark"><span className="brandDot" />FACTYGO</div>
+          <span className="brandSubTag">EVIDENCE-FIRST VERIFICATION</span>
         </div>
+        {quota && (
+          <div
+            className={
+              "quotaBadge " +
+              (quota.daily_available_pct > 25 ? "high" : quota.daily_available_pct > 10 ? "med" : "low")
+            }
+            title={
+              `Model: ${quota.model} (${quota.utc_date} UTC)\n` +
+              `• Daily Requests (RPD): ${quota.remaining_requests_rpd?.toLocaleString()} / ${quota.limit_requests_rpd?.toLocaleString()} (${quota.rpd_available_pct}%)\n` +
+              `• Daily Tokens (TPD): ${quota.remaining_tokens_tpd?.toLocaleString()} / ${quota.limit_tokens_tpd?.toLocaleString()} (${quota.tpd_available_pct}%)\n` +
+              `• Per-Minute Speed (TPM): ${quota.tpm_available_pct}% available`
+            }
+          >
+            <div className="quotaMainLine">
+              <span className="quotaPulse" />
+              <span>
+                Daily Quota: <strong>{quota.daily_available_pct}%</strong>
+                {quota.remaining_requests_rpd != null && (
+                  <small className="quotaSub"> ({quota.remaining_requests_rpd} RPD)</small>
+                )}
+              </span>
+            </div>
+            <div className="quotaMergedReset">
+              resets {quota.rpd_used_pct}% /{" "}
+              {quota.reset_duration_label ||
+                (quota.reset_in_minutes < 60
+                  ? `${quota.reset_in_minutes} min`
+                  : `${(quota.reset_in_minutes / 60).toFixed(1)} hr`)}
+            </div>
+          </div>
+        )}
       </div>
 
       {quota?.alert_message && (
@@ -474,10 +478,9 @@ export default function Home() {
         </div>
       )}
 
-      <header className="hero">
-        <div className="eyebrow">AI RESEARCH & AUDIT WORKSPACE</div>
-        <h1>Investigate claims.<br /><span>Audit AI outputs.</span></h1>
-        <p>Verify claims against live primary sources, check symbolic math & timelines, or catch hallucinated DOIs and links in AI-generated text.</p>
+      <header className="hero compactHero">
+        <div className="eyebrow">AI RESEARCH &amp; AUDIT WORKSPACE.</div>
+        <p className="heroSubCompact">Verify claims against live primary sources, check symbolic math &amp; timelines, or catch hallucinated DOIs and links in AI-generated text.</p>
       </header>
 
       {quota?.rpd_limit_reached && (
@@ -529,7 +532,7 @@ export default function Home() {
             placeholder={
               mode === "audit_ai"
                 ? "Paste a ChatGPT/Gemini paragraph with DOIs, PMIDs, arXiv IDs, or URLs to audit..."
-                : "Write your claim or question..."
+                : "Prompt your claims"
             }
             rows={2}
             disabled={loading}
