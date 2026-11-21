@@ -45,6 +45,7 @@ def _raw_answer(question: str, documents: list[dict]) -> str:
 
 def _format_quick_report(verdict: str, claim: str, raw_text: str) -> str:
     cleaned = " ".join(str(raw_text or "").split()).strip()
+    title_verdict = verdict.title()
     cleaned = re.sub(
         r"^Result\s*:\s*(?:TRUE|MOSTLY TRUE|PARTLY TRUE|MISLEADING|MOSTLY FALSE|FALSE|UNVERIFIED)?\s*[,:\-–]?\s*",
         "",
@@ -57,11 +58,12 @@ def _format_quick_report(verdict: str, claim: str, raw_text: str) -> str:
         cleaned,
         flags=re.I,
     )
+    cleaned = re.sub(r",?\s*making the claim (?:false|true|misleading)\.?$", ".", cleaned, flags=re.I)
     if cleaned:
-        return cleaned[:1].upper() + cleaned[1:]
-    return f"Evaluated against top retrieved primary sources for \"{claim[:100]}\"."
-
-
+        cleaned = cleaned[:1].upper() + cleaned[1:]
+    else:
+        cleaned = f"Evaluated against top retrieved primary sources for \"{claim[:100]}\"."
+    return f"Result : {title_verdict}, {cleaned}"
 
 
 def _compute_analysis(evidence: list[dict], base_analysis: dict | None = None) -> dict:
