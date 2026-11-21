@@ -207,6 +207,15 @@ export default function Home() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [shuffledPrompts, setShuffledPrompts] = useState(CLAIM_PROMPTS);
   const [quota, setQuota] = useState(null);
+  const [quotaTick, setQuotaTick] = useState(0);
+  const quotaFetchedAtRef = useRef(Date.now());
+
+  useEffect(() => {
+    const secTimer = setInterval(() => {
+      setQuotaTick(t => t + 1);
+    }, 1000);
+    return () => clearInterval(secTimer);
+  }, []);
   const searchBoxRef = useRef(null);
 
   async function fetchQuota() {
@@ -214,6 +223,7 @@ export default function Home() {
       const r = await fetch(API + "/api/quota", { cache: "no-store" });
       if (r.ok) {
         const q = await r.json();
+        quotaFetchedAtRef.current = Date.now();
         setQuota(q);
       }
     } catch {
@@ -431,12 +441,34 @@ export default function Home() {
     }
   }
 
+  const isActiveView = Boolean(loading || (result && !result.error));
+
+  function resetToHome() {
+    setLoading(false);
+    setResult(null);
+    setCopied(false);
+    setShowAllSources(false);
+    setShowSuggestions(false);
+  }
+
   return (
-    <main className={"appShell" + ((loading || (result && !result.error)) ? " workspaceActive" : " workspaceIdle")}>
+    <main className={"appShell" + (isActiveView ? " workspaceActive" : " workspaceIdle")}>
       <div className="topBar">
-        <div className="brandGroup">
-          <div className="brandMark"><span className="brandDot" />FACTYGO</div>
-          <span className="brandSubTag">EVIDENCE-FIRST VERIFICATION</span>
+        <div className="brandLeftWrap">
+          <div className="brandGroup">
+            <div className="brandMark"><span className="brandDot" />FACTYGO</div>
+            <span className="brandSubTag">EVIDENCE-FIRST VERIFICATION</span>
+          </div>
+          {isActiveView && (
+            <button
+              type="button"
+              className="homeBackBtn"
+              onClick={resetToHome}
+              title="Back to Home"
+            >
+              ← Home
+            </button>
+          )}
         </div>
         {quota && (() => {
           const tPct = quota.tpd_available_pct ?? quota.daily_available_pct ?? 100;
@@ -444,7 +476,7 @@ export default function Home() {
           const tUsed = quota.tpd_used_pct ?? Math.max(0, Math.min(100, 100 - tPct));
           const rUsed = quota.rpd_used_pct ?? Math.max(0, Math.min(100, 100 - rPct));
 
-          const formatRemaining = (secValue, fallbackLabel) => {
+          const formatRemaining = (secValue) => {
             const s = Number(secValue ?? 0);
             if (s <= 0) return null;
             if (s < 60) return `${s} ${s === 1 ? "second" : "seconds"}`;
@@ -458,8 +490,13 @@ export default function Home() {
             return `${hNum} ${hNum === 1 ? "hour" : "hours"}`;
           };
 
-          const tRem = formatRemaining(quota.token_reset_seconds, quota.token_reset_label);
-          const rRem = formatRemaining(quota.request_reset_seconds, quota.request_reset_label);
+          const _tickRef = quotaTick;
+          void _tickRef;
+          const elapsedLocalSec = Math.max(0, Math.floor((Date.now() - quotaFetchedAtRef.current) / 1000));
+          const liveTokenSec = Math.max(0, Number(quota.token_reset_seconds ?? 0) - elapsedLocalSec);
+          const liveRequestSec = Math.max(0, Number(quota.request_reset_seconds ?? 0) - elapsedLocalSec);
+          const tRem = formatRemaining(liveTokenSec);
+          const rRem = formatRemaining(liveRequestSec);
 
           const resetParts = [];
           if (tUsed > 0) {
@@ -510,8 +547,12 @@ export default function Home() {
 
       <header className="hero">
         <div className="eyebrow">AI RESEARCH &amp; AUDIT WORKSPACE</div>
-        <h1>Investigate claims.<br /><span>Audit AI outputs.</span></h1>
-        {!loading && <p className="heroSubtitleClean">Verify claims against live primary sources, check math &amp; timelines, and audit AI citations.</p>}
+        {!isActiveView && (
+          <>
+            <h1>Investigate claims.<br /><span>Audit AI outputs.</span></h1>
+            <p className="heroSubtitleClean">Verify claims against live primary sources, check math &amp; timelines, and audit AI citations.</p>
+          </>
+        )}
       </header>
 
       {quota?.rpd_limit_reached && (
@@ -594,7 +635,7 @@ export default function Home() {
           )}
         </div>
         <div className="searchFooter">
-          {!loading && <span className="hint">Ctrl/Cmd + Enter to run · Auto-detects DOIs, PMIDs, arXiv &amp; URLs</span>}
+          {!isActiveView && <span className="hint">Ctrl/Cmd + Enter to run · Auto-detects DOIs, PMIDs, arXiv &amp; URLs</span>}
           <button className="primaryButton" onClick={() => investigate()} disabled={loading || !text.trim()}>
             {loading ? <><span className="spinner" /> Investigating…</> : <>{mode === "audit_ai" ? "Audit Citations" : "Investigate"} <span>→</span></>}
           </button>

@@ -1223,3 +1223,33 @@ textarea {
   margin-bottom: 14px;
   padding: 11px 16px;
 }
+
+
+.brandLeftWrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.homeBackBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.homeBackBtn:hover {
+  background: var(--line-soft);
+  border-color: #cbd5e1;
+}
+
+.homeBackBtn:active {
+  transform: scale(0.98);
+}
