@@ -484,8 +484,9 @@ export default function Home() {
       )}
 
       <header className="hero">
-        <h1 className="heroEyebrowHeadline">AI RESEARCH &amp; AUDIT WORKSPACE</h1>
-        <p>Verify claims against live primary sources, check symbolic math &amp; timelines, or catch hallucinated DOIs and links in AI-generated text.</p>
+        <div className="eyebrow">AI RESEARCH &amp; AUDIT WORKSPACE</div>
+        <p className="heroDescReordered">Verify claims against live primary sources, check symbolic math &amp; timelines, or catch hallucinated DOIs and links in AI-generated text.</p>
+        <h1>Investigate claims.<br /><span>Audit AI outputs.</span></h1>
       </header>
 
       {quota?.rpd_limit_reached && (

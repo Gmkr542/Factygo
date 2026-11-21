@@ -1075,3 +1075,11 @@ a.unifiedSourceCard:hover .unifiedCardTitle { color: var(--accent); }
     line-height: 1.12;
   }
 }
+
+
+.hero .heroDescReordered {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-secondary);
+  margin: 0 0 14px;
+}
