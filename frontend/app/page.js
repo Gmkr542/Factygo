@@ -481,8 +481,13 @@ export default function Home() {
           const _tickRef = quotaTick;
           void _tickRef;
           const elapsedLocalSec = Math.max(0, Math.floor((Date.now() - quotaFetchedAtRef.current) / 1000));
-          const liveTokenSec = Math.max(0, Number(quota.token_reset_seconds ?? 0) - elapsedLocalSec);
-          const liveRequestSec = Math.max(0, Number(quota.request_reset_seconds ?? 0) - elapsedLocalSec);
+          const liveDailySec = Math.max(0, Number(quota.daily_reset_seconds ?? 0) - elapsedLocalSec);
+          const rawTokenSec = Math.max(0, Number(quota.token_reset_seconds ?? 0) - elapsedLocalSec);
+          const rawRequestSec = Math.max(0, Number(quota.request_reset_seconds ?? 0) - elapsedLocalSec);
+
+          const liveTokenSec = tUsed > 0 ? (rawTokenSec > 0 ? rawTokenSec : liveDailySec) : 0;
+          const liveRequestSec = rUsed > 0 ? (rawRequestSec > 0 ? rawRequestSec : liveDailySec) : 0;
+
           const tRem = formatRemaining(liveTokenSec);
           const rRem = formatRemaining(liveRequestSec);
 
@@ -494,8 +499,11 @@ export default function Home() {
             resetParts.push(`${rUsed}% in ${rRem}`);
           }
 
-          const tHoverStatus = tUsed === 0 ? "100% available" : (tRem ? `resets in ${tRem}` : "100% available");
-          const rHoverStatus = rUsed === 0 ? "100% available" : (rRem ? `resets in ${rRem}` : "100% available");
+          const tHoverParts = [`${tPct}% left`];
+          if (tUsed > 0 && tRem) tHoverParts.push(`reset timer: ${tRem}`);
+
+          const rHoverParts = [`${rPct}% left`];
+          if (rUsed > 0 && rRem) rHoverParts.push(`reset timer: ${rRem}`);
 
           return (
             <div
@@ -505,9 +513,9 @@ export default function Home() {
               }
               title={
                 `Model: ${quota.model} (${quota.utc_date} UTC)\n` +
-                `• Tokens (T): ${quota.remaining_tokens_tpd?.toLocaleString()} / ${quota.limit_tokens_tpd?.toLocaleString()} (${tPct}% left, ${tUsed}% used · ${tHoverStatus})\n` +
-                `• Requests (R): ${quota.remaining_requests_rpd?.toLocaleString()} / ${quota.limit_requests_rpd?.toLocaleString()} (${rPct}% left, ${rUsed}% used · ${rHoverStatus})\n` +
-                `• Per-Minute Speed (TPM): ${quota.tpm_available_pct}% available`
+                `• Tokens (T): ${quota.remaining_tokens_tpd?.toLocaleString()} / ${quota.limit_tokens_tpd?.toLocaleString()} (${tHoverParts.join(" · ")})\n` +
+                `• Requests (R): ${quota.remaining_requests_rpd?.toLocaleString()} / ${quota.limit_requests_rpd?.toLocaleString()} (${rHoverParts.join(" · ")})\n` +
+                `• Per-Minute Speed (TPM): ${quota.tpm_available_pct}% left`
               }
             >
               <div className="quotaMainLine">

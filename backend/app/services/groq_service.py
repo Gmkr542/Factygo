@@ -207,6 +207,7 @@ def get_quota_status() -> dict:
         "utc_date": _utc_today(),
         "token_reset_seconds": tok_rem_sec,
         "request_reset_seconds": req_rem_sec,
+        "daily_reset_seconds": daily_reset_sec,
         "token_reset_label": t_reset_label,
         "request_reset_label": r_reset_label,
         "rpd_limit_reached": rpd_limit_reached,
