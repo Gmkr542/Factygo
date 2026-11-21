@@ -74,18 +74,14 @@ def get_quota_status() -> dict:
     day_elapsed_sec = max(0.0, (now_utc - prev_midnight_utc).total_seconds())
     day_total_sec = 86400.0
 
-    updated_at = float(_QUOTA_STATE.get("updated_at") or 0.0)
-    elapsed_since_hdr = max(0.0, now_mono - updated_at) if updated_at > 0 else 0.0
     active_model = _QUOTA_STATE.get("model") or s.groq_model
     default_tpd, default_rpd = _MODEL_DAILY_CAPS.get(active_model, (200_000, 1_000))
 
     tokens_used_today, requests_used_today = _get_daily_usage()
 
-    # Live background calculation from Groq rate-limit headers & elapsed time:
     rem_tpm = _QUOTA_STATE.get("remaining_tokens_tpm")
     lim_tpm = _QUOTA_STATE.get("limit_tokens_tpm")
     hdr_tok_rem = max(0.0, float(_QUOTA_STATE.get("tokens_reset_at") or 0.0) - now_mono)
-    hdr_req_rem = max(0.0, float(_QUOTA_STATE.get("requests_reset_at") or 0.0) - now_mono)
 
     # Per-Minute Speed (TPM) from live Groq token headers + elapsed reset window
     if not s.groq_api_key:
@@ -96,9 +92,8 @@ def get_quota_status() -> dict:
         else:
             tpm_pct = max(0, min(100, round((rem_tpm / lim_tpm) * 100)))
     else:
-        # Derive live minute-window availability from seconds elapsed within current UTC minute
         sec_in_min = now_utc.second + (now_utc.microsecond / 1_000_000.0)
-        tpm_pct = max(0, min(100, round(100.0 - (sec_in_min / 60.0) * 15.0))) if s.groq_api_key else 0
+        tpm_pct = max(0, min(100, round(100.0 - (sec_in_min / 60.0) * 15.0)))
 
     # Daily Requests (RPD) from live Groq request headers + live request activity
     lim_rpd = int(_QUOTA_STATE.get("limit_requests_rpd") or default_rpd)
@@ -106,7 +101,8 @@ def get_quota_status() -> dict:
         rpd_pct = 0
         rem_rpd = 0
     elif _QUOTA_STATE.get("remaining_requests_rpd") is not None:
-        rem_rpd = max(0, min(lim_rpd, int(_QUOTA_STATE["remaining_requests_rpd"])))
+        hdr_rem_rpd = max(0, min(lim_rpd, int(_QUOTA_STATE["remaining_requests_rpd"])))
+        rem_rpd = max(0, min(hdr_rem_rpd, lim_rpd - requests_used_today))
         rpd_pct = max(0, min(100, round((rem_rpd / lim_rpd) * 100))) if lim_rpd > 0 else 100
     else:
         rem_rpd = max(0, lim_rpd - requests_used_today)
@@ -121,13 +117,11 @@ def get_quota_status() -> dict:
         rem_tpd = max(0, lim_tpd - tokens_used_today)
         tpd_pct = max(0, min(100, round((rem_tpd / lim_tpd) * 100))) if lim_tpd > 0 else 100
     elif lim_tpm and rem_tpm is not None and lim_tpm > 0:
-        # Reflect live token consumption ratio in daily budget when header reports consumed tokens
         consumed_ratio = max(0.0, min(1.0, 1.0 - (rem_tpm / lim_tpm)))
         est_used = int(round(consumed_ratio * lim_tpd))
         rem_tpd = max(0, lim_tpd - est_used)
         tpd_pct = max(0, min(100, round((rem_tpd / lim_tpd) * 100))) if lim_tpd > 0 else 100
     else:
-        # Background UTC-day calculation before any calls in this run
         utc_ratio = max(0.0, min(1.0, day_elapsed_sec / day_total_sec))
         rem_tpd = max(0, lim_tpd - int(round(utc_ratio * lim_tpd * 0.05)))
         tpd_pct = max(0, min(100, round((rem_tpd / lim_tpd) * 100))) if lim_tpd > 0 else 100
@@ -202,6 +196,121 @@ def get_quota_status() -> dict:
         "alert_message": alert_message,
         "status": "unconfigured" if not s.groq_api_key else _QUOTA_STATE.get("last_status", "idle"),
     }
+
+def _record_rate_headers(headers, model: str, status_code: int, is_tpd: bool = False) -> None:
+    def _int_hdr(name: str) -> int | None:
+        val = headers.get(name)
+        if val is None:
+            return None
+        try:
+            return int(float(str(val).strip()))
+        except ValueError:
+            return None
+
+    rem_tpm = _int_hdr("x-ratelimit-remaining-tokens")
+    lim_tpm = _int_hdr("x-ratelimit-limit-tokens")
+    rem_rpd = _int_hdr("x-ratelimit-remaining-requests")
+    lim_rpd = _int_hdr("x-ratelimit-limit-requests")
+    res_tok = _duration_seconds(headers.get("x-ratelimit-reset-tokens")) or 0.0
+    res_req = _duration_seconds(headers.get("x-ratelimit-reset-requests")) or 0.0
+
+    if rem_tpm is not None:
+        _QUOTA_STATE["remaining_tokens_tpm"] = rem_tpm
+    if lim_tpm is not None:
+        _QUOTA_STATE["limit_tokens_tpm"] = lim_tpm
+    if rem_rpd is not None:
+        _QUOTA_STATE["remaining_requests_rpd"] = rem_rpd
+    if lim_rpd is not None:
+        _QUOTA_STATE["limit_requests_rpd"] = lim_rpd
+    now_mono = time.monotonic()
+    _QUOTA_STATE["reset_tokens_in"] = res_tok
+    _QUOTA_STATE["reset_requests_in"] = res_req
+    if res_tok > 0:
+        _QUOTA_STATE["tokens_reset_at"] = now_mono + res_tok
+    if res_req > 0:
+        _QUOTA_STATE["requests_reset_at"] = now_mono + res_req
+    _QUOTA_STATE["updated_at"] = now_mono
+    _QUOTA_STATE["model"] = model
+    if is_tpd:
+        _QUOTA_STATE["last_status"] = "tpd_limited"
+    else:
+        _QUOTA_STATE["last_status"] = "rate_limited" if status_code == 429 else ("ok" if status_code < 400 else "error")
+
+
+class GroqProviderError(RuntimeError):
+    pass
+
+
+class GroqPayloadTooLargeError(GroqProviderError):
+    pass
+
+
+class GroqRateLimitError(GroqProviderError):
+    def __init__(self, message: str, retry_after: float = 10.0, limit_kind: str = "unknown"):
+        super().__init__(message)
+        self.retry_after = max(1.0, float(retry_after))
+        self.limit_kind = limit_kind
+
+
+def _duration_seconds(value: str | None) -> float | None:
+    if not value:
+        return None
+    raw = str(value).strip().lower()
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        pass
+    total = 0.0
+    matches = list(re.finditer(r"(\d+(?:\.\d+)?)\s*(ms|h|m|s)", raw))
+    if not matches:
+        return None
+    for m in matches:
+        amt = float(m.group(1))
+        unit = m.group(2)
+        total += amt / 1000 if unit == "ms" else amt * {"s": 1, "m": 60, "h": 3600}[unit]
+    return total
+
+
+def _retry_delay_from_message(message: str, fallback: float) -> float:
+    match = re.search(
+        r"try again in\s+([0-9.]+\s*(?:ms|h|m|s)(?:\s*[0-9.]+\s*(?:ms|h|m|s))*)",
+        str(message or ""),
+        flags=re.I,
+    )
+    if match:
+        parsed = _duration_seconds(match.group(1))
+        if parsed is not None:
+            return max(0.5, parsed)
+    return max(0.5, float(fallback))
+
+
+def _is_text_generation_model(model: str) -> bool:
+    m = model.lower()
+    blocked = ("prompt-guard", "guard", "safeguard", "moderation", "whisper", "tts", "embed", "rerank")
+    if any(x in m for x in blocked):
+        return False
+    return any(x in m for x in ("gpt-oss", "llama-3", "llama-4", "qwen", "mixtral", "gemma"))
+
+
+def _text_model_candidates(models: set[str]) -> list[str]:
+    def score(model: str) -> tuple[int, str]:
+        m = model.lower()
+        if "gpt-oss" in m:
+            rank = 0
+        elif "llama-3.3" in m:
+            rank = 1
+        elif "llama-3" in m:
+            rank = 2
+        elif "qwen" in m:
+            rank = 3
+        elif "llama-4" in m:
+            rank = 4
+        else:
+            rank = 5
+        return rank, m
+
+    return sorted((m for m in models if _is_text_generation_model(m)), key=score)
+
 
 async def _available_models() -> set[str]:
     global _model_cache
