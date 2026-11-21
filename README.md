@@ -2,8 +2,8 @@
 
 ## Evidence-first AI investigation platform
 
-**Live Web App:** https://onrender.com  
-**Live API Docs:** https://onrender.com
+**Live Web App:**  [https://onrender.com](https://factygo-web.onrender.com)  
+**Live API Docs:** [https://onrender.com](https://factygo-api.onrender.com)
 
 Factygo turns claims, questions, and social posts into structured, evidence-grounded investigations.
 
