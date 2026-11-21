@@ -857,3 +857,42 @@ a.unifiedSourceCard:hover .unifiedCardTitle { color: var(--accent); }
   .searchFooter { flex-direction: column; align-items: stretch; }
   .primaryButton { width: 100%; }
 }
+
+
+.topRightCluster {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.quotaBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-secondary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
+}
+
+.quotaBadge.high { border-color: #b7dfc1; background: #f3fbf5; color: var(--green); }
+.quotaBadge.med { border-color: #fde68a; background: var(--amber-bg); color: var(--amber); }
+.quotaBadge.low { border-color: #f5c2c0; background: var(--red-bg); color: var(--red); }
+
+.quotaPulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulseDot 2s infinite;
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}

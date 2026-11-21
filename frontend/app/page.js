@@ -206,7 +206,26 @@ export default function Home() {
   const [showAllSources, setShowAllSources] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [shuffledPrompts, setShuffledPrompts] = useState(CLAIM_PROMPTS);
+  const [quota, setQuota] = useState(null);
   const searchBoxRef = useRef(null);
+
+  async function fetchQuota() {
+    try {
+      const r = await fetch(API + "/api/quota", { cache: "no-store" });
+      if (r.ok) {
+        const q = await r.json();
+        setQuota(q);
+      }
+    } catch {
+      // Ignore transient network errors during polling
+    }
+  }
+
+  useEffect(() => {
+    fetchQuota();
+    const timer = setInterval(fetchQuota, 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   const activePromptBank = mode === "audit_ai" ? AUDIT_PROMPTS : CLAIM_PROMPTS;
 
@@ -289,6 +308,7 @@ export default function Home() {
       });
     } finally {
       setLoading(false);
+      fetchQuota();
     }
   }
 
@@ -415,7 +435,25 @@ export default function Home() {
     <main className="appShell">
       <div className="topBar">
         <div className="brandMark"><span className="brandDot" />FACTYGO</div>
-        <span className="topTag">EVIDENCE-FIRST VERIFICATION & AI AUDITOR</span>
+        <div className="topRightCluster">
+          <span className="topTag">EVIDENCE-FIRST VERIFICATION</span>
+          {quota && (
+            <div
+              className={
+                "quotaBadge " +
+                (quota.available_pct >= 50 ? "high" : quota.available_pct >= 20 ? "med" : "low")
+              }
+              title={
+                quota.remaining_tokens != null && quota.limit_tokens != null
+                  ? `Model: ${quota.model} · Tokens: ${quota.remaining_tokens.toLocaleString()} / ${quota.limit_tokens.toLocaleString()} remaining (auto-updates every 15s)`
+                  : `Model: ${quota.model} · Auto-updates every 15s`
+              }
+            >
+              <span className="quotaPulse" />
+              <span>AI Quota: <strong>{quota.available_pct}%</strong></span>
+            </div>
+          )}
+        </div>
       </div>
 
       <header className="hero">

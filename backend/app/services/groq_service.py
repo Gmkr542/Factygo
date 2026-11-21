@@ -18,6 +18,89 @@ _model_cache: tuple[float, set[str]] | None = None
 MODEL_CACHE_SECONDS = 300
 _ai_tokens_reset_at = 0.0
 
+_QUOTA_STATE: dict = {
+    "remaining_tokens": None,
+    "limit_tokens": None,
+    "remaining_requests": None,
+    "limit_requests": None,
+    "reset_tokens_in": 0.0,
+    "reset_requests_in": 0.0,
+    "updated_at": 0.0,
+    "model": None,
+    "last_status": "idle",
+}
+
+
+def get_quota_status() -> dict:
+    s = get_settings()
+    now = time.monotonic()
+    elapsed = (now - _QUOTA_STATE["updated_at"]) if _QUOTA_STATE["updated_at"] else 0.0
+
+    rem_tok = _QUOTA_STATE["remaining_tokens"]
+    lim_tok = _QUOTA_STATE["limit_tokens"]
+    rem_req = _QUOTA_STATE["remaining_requests"]
+    lim_req = _QUOTA_STATE["limit_requests"]
+
+    # Calculate remaining percentage from real Groq headers if available
+    pct = 100
+    if lim_tok and rem_tok is not None and lim_tok > 0:
+        tok_pct = round((rem_tok / lim_tok) * 100)
+        pct = tok_pct
+        if lim_req and rem_req is not None and lim_req > 0:
+            req_pct = round((rem_req / lim_req) * 100)
+            pct = min(tok_pct, req_pct)
+        # If the reset window has elapsed since last call, quota has replenished
+        reset_win = max(_QUOTA_STATE["reset_tokens_in"], _QUOTA_STATE["reset_requests_in"])
+        if reset_win > 0 and elapsed >= reset_win:
+            pct = 100
+    elif not s.groq_api_key:
+        pct = 0
+
+    return {
+        "ai_configured": bool(s.groq_api_key),
+        "available_pct": max(0, min(100, int(pct))),
+        "remaining_tokens": rem_tok,
+        "limit_tokens": lim_tok,
+        "remaining_requests": rem_req,
+        "limit_requests": lim_req,
+        "model": _QUOTA_STATE["model"] or s.groq_model,
+        "status": "unconfigured" if not s.groq_api_key else _QUOTA_STATE["last_status"],
+        "seconds_since_check": round(elapsed, 1) if _QUOTA_STATE["updated_at"] else None,
+    }
+
+
+def _record_rate_headers(headers, model: str, status_code: int) -> None:
+    def _int_hdr(name: str) -> int | None:
+        val = headers.get(name)
+        if val is None:
+            return None
+        try:
+            return int(float(str(val).strip()))
+        except ValueError:
+            return None
+
+    rem_tok = _int_hdr("x-ratelimit-remaining-tokens")
+    lim_tok = _int_hdr("x-ratelimit-limit-tokens")
+    rem_req = _int_hdr("x-ratelimit-remaining-requests")
+    lim_req = _int_hdr("x-ratelimit-limit-requests")
+    res_tok = _duration_seconds(headers.get("x-ratelimit-reset-tokens")) or 0.0
+    res_req = _duration_seconds(headers.get("x-ratelimit-reset-requests")) or 0.0
+
+    if rem_tok is not None:
+        _QUOTA_STATE["remaining_tokens"] = rem_tok
+    if lim_tok is not None:
+        _QUOTA_STATE["limit_tokens"] = lim_tok
+    if rem_req is not None:
+        _QUOTA_STATE["remaining_requests"] = rem_req
+    if lim_req is not None:
+        _QUOTA_STATE["limit_requests"] = lim_req
+    _QUOTA_STATE["reset_tokens_in"] = res_tok
+    _QUOTA_STATE["reset_requests_in"] = res_req
+    _QUOTA_STATE["updated_at"] = time.monotonic()
+    _QUOTA_STATE["model"] = model
+    _QUOTA_STATE["last_status"] = "rate_limited" if status_code == 429 else ("ok" if status_code < 400 else "error")
+
+
 
 class GroqProviderError(RuntimeError):
     pass
@@ -131,6 +214,7 @@ async def _request_impl(model: str, instruction: str) -> str:
                 ],
             },
         )
+        _record_rate_headers(r.headers, model, r.status_code)
         reset_sec = _duration_seconds(r.headers.get("x-ratelimit-reset-tokens"))
         if reset_sec is not None:
             _ai_tokens_reset_at = time.monotonic() + reset_sec
@@ -276,7 +360,7 @@ Rules:
    - NEVER use filler phrases like "The claim that...", "Multiple sources indicate...", "Available evidence shows...", or "making the claim false". State the facts directly.
 4. Provide 2-3 concise, high-signal "key_takeaways" (12-22 words each) summarizing concrete findings with evidence IDs like (E01).
 5. Provide "caveat" (1 short sentence, or empty string "") ONLY if retrieved evidence has limitations (e.g., preliminary animal studies, missing exact figures, or regional scope).
-6. OPTIONAL CONTEXTUAL VISUAL BLOCK ("visual_blocks"): Include at most 1 visual block ONLY if retrieved evidence genuinely supports a structured comparison, timeline, or verified numeric chart—otherwise return []:
+6. CONTEXTUAL VISUAL BLOCK ("visual_blocks"): When the input asks to compare two things, spans multiple dates, or contains verified numeric ranges across categories, emit 1 structured visual block (otherwise return []):
    - Comparison table: {{"type": "table", "title": "string", "headers": ["Aspect", "Claimed", "Verified Evidence"], "rows": [["...", "...", "... (E01)"]]}}
    - Chronological timeline: {{"type": "timeline", "title": "string", "events": [{{"date": "2023", "label": "Event description", "evidence_id": "E01"}}]}}
    - Quantitative bar chart (ONLY when exact numbers appear in evidence/computed facts): {{"type": "bar_chart", "title": "string", "unit": "%", "bars": [{{"label": "Category", "value": 75, "display": "75%", "evidence_id": "E01"}}]}}

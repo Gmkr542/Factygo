@@ -1,11 +1,13 @@
 import ipaddress
 import socket
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, unquote, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 
 from app.core.config import get_settings
+
+WIKI_UA = "FactygoBot/3.0 (https://github.com/Gmkr542/Factygo; contact@factygo.app)"
 
 
 class ArticleFetchError(Exception):
@@ -42,6 +44,29 @@ def _public_http_url(url: str) -> bool:
         return False
 
 
+async def _fetch_wikipedia_rest(url: str, timeout: float) -> tuple[str, str] | None:
+    p = urlparse(url)
+    host = (p.hostname or "").lower()
+    if not host.endswith("wikipedia.org") or "/wiki/" not in p.path:
+        return None
+    slug = unquote(p.path.split("/wiki/", 1)[1]).strip()
+    if not slug:
+        return None
+    api_url = f"https://{host}/api/rest_v1/page/summary/{quote(slug, safe='')}"
+    try:
+        async with httpx.AsyncClient(timeout=timeout, headers={"User-Agent": WIKI_UA}) as client:
+            r = await client.get(api_url)
+            if r.status_code == 200:
+                data = r.json()
+                title = str(data.get("title") or slug.replace("_", " "))
+                extract = str(data.get("extract") or "").strip()
+                if extract:
+                    return title[:500], extract[:get_settings().max_article_chars]
+    except Exception:
+        return None
+    return None
+
+
 async def _request_limited(url: str, ua: str, timeout: float, max_bytes: int):
     current = url
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False, headers={"User-Agent": ua}) as client:
@@ -68,11 +93,15 @@ async def fetch_article(url: str, timeout_override: float | None = None) -> tupl
     if not _public_http_url(url):
         raise ArticleFetchError("Invalid or non-public URL")
     settings = get_settings()
-    ua = "Factygo/2.0"
     timeout = timeout_override or settings.request_timeout
-    status, headers, body, final_url = await _request_limited(url, ua, timeout, settings.max_article_chars * 10)
+
+    wiki_res = await _fetch_wikipedia_rest(url, timeout)
+    if wiki_res:
+        return wiki_res
+
+    status, headers, body, final_url = await _request_limited(url, WIKI_UA, timeout, settings.max_article_chars * 10)
     if status >= 400 or not _public_http_url(final_url):
-        raise ArticleFetchError("Unable to retrieve article")
+        raise ArticleFetchError(f"Unable to retrieve article (HTTP {status})")
     if "text/html" not in headers.get("content-type", "").lower():
         raise ArticleFetchError("URL is not an HTML page")
     soup = BeautifulSoup(body, "html.parser")

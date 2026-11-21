@@ -8,7 +8,7 @@ def classify_study_tier(title: str, text: str, source_type: str) -> tuple[str, i
     blob = f"{title} {text}".lower()
     if any(k in blob for k in ("systematic review", "meta-analysis", "randomized controlled trial", "randomised controlled trial", "double-blind", "cochrane")):
         return ("Tier 1 · Meta-Analysis / RCT", 1)
-    if any(k in blob for k in ("clinical trial", "cohort study", "human trial", "clinical study", "who ", "cdc ", "nih ", "government", "official")):
+    if "government" in source_type.lower() or "official" in source_type.lower() or any(k in blob for k in ("clinical trial", "cohort study", "human trial", "clinical study", "who ", "cdc ", "nih ", "government", "official")):
         return ("Tier 2 · Clinical / Official", 2)
     if any(k in blob for k in ("in vitro", "in-vitro", "mice", "mouse", "rat model", "rodent", "animal study", "cell line", "preclinical")):
         return ("Tier 3 · Preclinical / Animal", 3)

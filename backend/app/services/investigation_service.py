@@ -202,6 +202,27 @@ async def investigate_async(text: str, mode: str = "auto") -> InvestigationRespo
     seen_urls: set[str] = set()
     docs_by_question: list[tuple[int, str, list[dict]]] = []
 
+    # Promote verified registry abstracts (arXiv, CrossRef, PubMed, Wikipedia) directly into primary evidence
+    for aud in citation_audits:
+        if aud.get("status") == "VERIFIED" and aud.get("abstract"):
+            a_url = aud.get("url") or f"https://registry.factygo/{aud.get('identifier', '')}"
+            if a_url not in seen_urls:
+                seen_urls.add(a_url)
+                documents.append({
+                    "title": aud.get("title") or aud.get("identifier", "Verified Registry Record"),
+                    "url": a_url,
+                    "domain": aud.get("domain") or "arxiv.org",
+                    "publisher": aud.get("identifier", "Primary Registry"),
+                    "content": aud["abstract"],
+                    "text": aud["abstract"],
+                    "source_type": "Academic / Reference",
+                    "source_quality": 95,
+                    "source_score": 0.95,
+                    "tier": 1,
+                    "relevance_score": 98,
+                    "full_article_read": True,
+                })
+
     for idx, (question, res) in enumerate(zip(questions, batch_results), start=1):
         if isinstance(res, Exception):
             logger.exception("Search failed for question %r: %s", question, res)
