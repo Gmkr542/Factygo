@@ -1083,3 +1083,44 @@ a.unifiedSourceCard:hover .unifiedCardTitle { color: var(--accent); }
   color: var(--ink-secondary);
   margin: 0 0 14px;
 }
+
+
+.summaryReportBox {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.summaryReportHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.summaryReportMeta {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.summaryReportLead,
+.summaryReportSection {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-secondary);
+}
+
+.compactSummaryList {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
