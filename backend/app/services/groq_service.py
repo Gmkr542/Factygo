@@ -40,26 +40,49 @@ _QUOTA_STATE: dict = {
 }
 
 
-def _daily_db_conn():
+_LAST_PERSISTED_USAGE: dict[str, tuple[int, int]] = {}
+
+
+def _quota_db_paths() -> list[str]:
     import os
-    import sqlite3
+    from pathlib import Path
     s = get_settings()
-    db_path = s.database_url.replace("sqlite:///", "") if s.database_url.startswith("sqlite:///") else "factygo.db"
-    try:
-        conn = sqlite3.connect(db_path)
-    except Exception:
-        conn = sqlite3.connect(os.path.join("/tmp", "factygo.db"))
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS daily_quota_usage (
-            utc_date TEXT PRIMARY KEY,
-            tokens_used INTEGER NOT NULL DEFAULT 0,
-            requests_used INTEGER NOT NULL DEFAULT 0
-        )
-        """
-    )
-    conn.commit()
-    return conn
+    candidates: list[str] = []
+    env_override = os.environ.get("FACTYGO_QUOTA_DB", "").strip()
+    if env_override:
+        candidates.append(env_override)
+    if s.database_url.startswith("sqlite:///"):
+        raw = s.database_url.replace("sqlite:///", "", 1)
+        candidates.append(raw)
+        candidates.append(str(Path(__file__).resolve().parents[3] / raw.lstrip("./")))
+    candidates.append(os.path.join("/tmp", "factygo_quota.db"))
+    seen: list[str] = []
+    for c in candidates:
+        if c and c not in seen:
+            seen.append(c)
+    return seen
+
+
+def _daily_db_conn():
+    import sqlite3
+    last_err: Exception | None = None
+    for db_path in _quota_db_paths():
+        try:
+            conn = sqlite3.connect(db_path, timeout=5.0)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS daily_quota_usage (
+                    utc_date TEXT PRIMARY KEY,
+                    tokens_used INTEGER NOT NULL DEFAULT 0,
+                    requests_used INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            conn.commit()
+            return conn
+        except Exception as exc:
+            last_err = exc
+    raise RuntimeError(f"Unable to open quota SQLite DB: {last_err}")
 
 
 def _utc_today() -> str:
@@ -68,39 +91,59 @@ def _utc_today() -> str:
 
 
 def _record_daily_usage(tokens_delta: int, requests_delta: int = 1) -> None:
-    try:
-        today = _utc_today()
-        conn = _daily_db_conn()
-        with conn:
-            conn.execute(
-                """
-                INSERT INTO daily_quota_usage (utc_date, tokens_used, requests_used)
-                VALUES (?, ?, ?)
-                ON CONFLICT(utc_date) DO UPDATE SET
-                    tokens_used = tokens_used + excluded.tokens_used,
-                    requests_used = requests_used + excluded.requests_used
-                """,
-                (today, max(0, int(tokens_delta)), max(0, int(requests_delta))),
-            )
-        conn.close()
-    except Exception as exc:
-        logger.debug("Daily quota DB update skipped: %s", exc)
+    today = _utc_today()
+    t_inc = max(0, int(tokens_delta))
+    r_inc = max(0, int(requests_delta))
+    prev_t, prev_r = _LAST_PERSISTED_USAGE.get(today, (0, 0))
+    _LAST_PERSISTED_USAGE[today] = (prev_t + t_inc, prev_r + r_inc)
+    for db_path in _quota_db_paths():
+        try:
+            import sqlite3
+            conn = sqlite3.connect(db_path, timeout=5.0)
+            with conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS daily_quota_usage (
+                        utc_date TEXT PRIMARY KEY,
+                        tokens_used INTEGER NOT NULL DEFAULT 0,
+                        requests_used INTEGER NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO daily_quota_usage (utc_date, tokens_used, requests_used)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(utc_date) DO UPDATE SET
+                        tokens_used = tokens_used + excluded.tokens_used,
+                        requests_used = requests_used + excluded.requests_used
+                    """,
+                    (today, t_inc, r_inc),
+                )
+            conn.close()
+        except Exception as exc:
+            logger.debug("Daily quota DB update skipped on %s: %s", db_path, exc)
 
 
 def _get_daily_usage() -> tuple[int, int]:
-    try:
-        today = _utc_today()
-        conn = _daily_db_conn()
-        row = conn.execute(
-            "SELECT tokens_used, requests_used FROM daily_quota_usage WHERE utc_date = ?",
-            (today,),
-        ).fetchone()
-        conn.close()
-        if row:
-            return int(row[0]), int(row[1])
-    except Exception:
-        pass
-    return 0, 0
+    today = _utc_today()
+    best_t, best_r = _LAST_PERSISTED_USAGE.get(today, (0, 0))
+    for db_path in _quota_db_paths():
+        try:
+            import sqlite3
+            conn = sqlite3.connect(db_path, timeout=5.0)
+            row = conn.execute(
+                "SELECT tokens_used, requests_used FROM daily_quota_usage WHERE utc_date = ?",
+                (today,),
+            ).fetchone()
+            conn.close()
+            if row:
+                best_t = max(best_t, int(row[0] or 0))
+                best_r = max(best_r, int(row[1] or 0))
+        except Exception:
+            pass
+    _LAST_PERSISTED_USAGE[today] = (best_t, best_r)
+    return best_t, best_r
 
 
 def get_quota_status() -> dict:
