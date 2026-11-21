@@ -148,11 +148,23 @@ def get_quota_status() -> dict:
             alert_level = "warning"
             alert_message = f"Low Daily Quota Alert: {daily_pct}% remaining ({rem_rpd}/{lim_rpd} requests left today). Repeated queries use cached results (0 quota)."
 
+    from datetime import datetime, timezone, timedelta
+    now_utc = datetime.now(timezone.utc)
+    next_midnight_utc = (now_utc + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    mins_until_reset = max(1, int((next_midnight_utc - now_utc).total_seconds() // 60))
+    rpd_used_pct = max(0, min(100, 100 - int(rpd_pct))) if s.groq_api_key else 100
+    rpd_limit_reached = bool(s.groq_api_key and (rem_rpd <= 0 or _QUOTA_STATE["last_status"] == "tpd_limited"))
+    reset_time_str = next_midnight_utc.strftime("%H:%M UTC")
+    if rpd_limit_reached and not alert_message:
+        alert_level = "critical"
+        alert_message = f"Daily RPD limit reached · Resets at {reset_time_str} ({mins_until_reset} min)."
+
     return {
         "ai_configured": bool(s.groq_api_key),
         "available_pct": daily_pct,
         "daily_available_pct": daily_pct,
         "rpd_available_pct": max(0, min(100, int(rpd_pct))),
+        "rpd_used_pct": rpd_used_pct,
         "tpd_available_pct": max(0, min(100, int(tpd_pct))),
         "tpm_available_pct": max(0, min(100, int(tpm_pct))),
         "remaining_requests_rpd": rem_rpd,
@@ -163,6 +175,9 @@ def get_quota_status() -> dict:
         "remaining_tokens_tpm": rem_tpm,
         "limit_tokens_tpm": lim_tpm,
         "utc_date": _utc_today(),
+        "reset_time_utc": reset_time_str,
+        "reset_in_minutes": mins_until_reset,
+        "rpd_limit_reached": rpd_limit_reached,
         "model": active_model,
         "alert_level": alert_level,
         "alert_message": alert_message,
