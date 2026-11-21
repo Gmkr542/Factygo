@@ -4,23 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-const tabs = [
-  ["verdict", "Verdict"],
-  ["evidence", "Web Evidence"],
-  ["sources", "Sources"],
-  ["claim", "Claim"],
-  ["analysis", "Analysis"],
-  ["research", "Research"],
-];
-
 const SAMPLE_PROMPTS = [
+  { text: "India is less populated country", tag: "Fact Check" },
   { text: "Lemon juice reduces diabetes", tag: "Health" },
   { text: "Drinking green tea prevents heart disease", tag: "Medical" },
   { text: "India's Chandrayaan-3 landed near the lunar south pole in August 2023", tag: "Space" },
   { text: "The Great Wall of China is visible from the Moon with the naked eye", tag: "Science" },
   { text: "Does intermittent fasting improve insulin sensitivity?", tag: "Question" },
   { text: "Antibiotics are effective against viral infections like the common cold", tag: "Medical" },
-  { text: "Does India have the world's largest population?", tag: "Question" },
   { text: "Solar panels generate zero electricity on cloudy days", tag: "Energy" },
 ];
 
@@ -51,43 +42,13 @@ function confidenceTone(value) {
 }
 
 function extractDomain(url, fallback = "") {
-  if (fallback) return fallback;
-  if (!url) return "";
+  if (fallback && fallback.includes(".")) return fallback.replace(/^www\./, "");
+  if (!url) return fallback || "";
   try {
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {
-    return "";
+    return fallback || "";
   }
-}
-
-function splitReport(explanation) {
-  const raw = String(explanation || "").trim();
-  if (!raw) {
-    return {
-      summary: "Factygo completed the investigation.",
-      breakdown: "No detailed breakdown was returned.",
-    };
-  }
-  const idx = raw.indexOf("Breakdown:");
-  if (idx !== -1) {
-    const summary = raw.slice(0, idx).trim();
-    const breakdown = raw.slice(idx).trim();
-    return {
-      summary: summary || raw,
-      breakdown: breakdown || raw,
-    };
-  }
-  const sentences = raw.split(/(?<=[.!?])\s+/).filter(Boolean);
-  if (sentences.length >= 2) {
-    return {
-      summary: sentences[0],
-      breakdown: "Breakdown: " + sentences.slice(1).join(" "),
-    };
-  }
-  return {
-    summary: raw,
-    breakdown: raw,
-  };
 }
 
 function renderWithCitations(text, evidenceById, sources) {
@@ -106,7 +67,7 @@ function renderWithCitations(text, evidenceById, sources) {
           const fallbackSrc = !ev && numIdx >= 0 && sources[numIdx] ? sources[numIdx] : null;
           const url = ev?.source_url || fallbackSrc?.url || "";
           const title = ev?.source_title || fallbackSrc?.title || eid;
-          const domain = extractDomain(url, ev?.publisher || fallbackSrc?.domain || "");
+          const domain = extractDomain(url, ev?.domain || fallbackSrc?.domain || "");
           if (!url) {
             return (
               <sup key={eid} className="citationPill" title={title}>
@@ -138,7 +99,6 @@ export default function Home() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
-  const [tab, setTab] = useState("verdict");
   const [copied, setCopied] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [shuffledPrompts, setShuffledPrompts] = useState(SAMPLE_PROMPTS);
@@ -190,7 +150,6 @@ export default function Home() {
     setShowSuggestions(false);
     setLoading(true);
     setResult(null);
-    setTab("verdict");
     setCopied(false);
 
     try {
@@ -234,17 +193,57 @@ export default function Home() {
     return map;
   }, [evidence]);
 
+  // Unified clickable Web Sources + Evidence items
+  const unifiedItems = useMemo(() => {
+    if (evidence.length) {
+      return evidence.map((e, idx) => {
+        const eid = e.evidence_id || `E${String(idx + 1).padStart(2, "0")}`;
+        const url = e.source_url || "";
+        const matchedSource = sources.find(s => s.url === url) || {};
+        const domain = extractDomain(url, e.domain || matchedSource.domain || "");
+        return {
+          id: eid,
+          title: e.source_title || matchedSource.title || url || "Web Source",
+          url,
+          domain,
+          publisher: e.publisher || matchedSource.publisher || domain || "Web Source",
+          excerpt: e.excerpt || "",
+          reason: e.reason || "",
+          stance: String(e.stance || "contextual").toLowerCase(),
+          sourceType: e.source_type || matchedSource.source_type || "Web Source",
+          score: e.source_score ?? matchedSource.source_score ?? 0.65,
+        };
+      });
+    }
+    return sources.map((s, idx) => {
+      const eid = `E${String(idx + 1).padStart(2, "0")}`;
+      const domain = extractDomain(s.url, s.domain || "");
+      return {
+        id: eid,
+        title: s.title || s.url || "Web Source",
+        url: s.url || "",
+        domain,
+        publisher: s.publisher || domain || "Web Source",
+        excerpt: "",
+        reason: "",
+        stance: "contextual",
+        sourceType: s.source_type || "Web Source",
+        score: s.source_score ?? 0.65,
+      };
+    });
+  }, [evidence, sources]);
+
   const supporting = useMemo(
-    () => evidence.filter(e => String(e.stance).toLowerCase() === "supporting"),
-    [evidence]
+    () => unifiedItems.filter(e => e.stance === "supporting"),
+    [unifiedItems]
   );
   const contradicting = useMemo(
-    () => evidence.filter(e => String(e.stance).toLowerCase() === "contradicting"),
-    [evidence]
+    () => unifiedItems.filter(e => e.stance === "contradicting"),
+    [unifiedItems]
   );
   const contextual = useMemo(
-    () => evidence.filter(e => String(e.stance).toLowerCase() === "contextual"),
-    [evidence]
+    () => unifiedItems.filter(e => e.stance === "contextual"),
+    [unifiedItems]
   );
 
   const ratio = useMemo(() => {
@@ -259,20 +258,13 @@ export default function Home() {
   }, [supporting.length, contradicting.length, contextual.length]);
 
   const domains = useMemo(() => {
-    if (result?.evidence_analysis?.independent_domains != null && result.evidence_analysis.independent_domains > 0) {
-      return result.evidence_analysis.independent_domains;
-    }
-    const hosts = new Set(
-      sources
-        .map(s => extractDomain(s.url, s.domain))
-        .filter(Boolean)
-    );
-    return hosts.size;
-  }, [result, sources]);
+    const hosts = new Set(unifiedItems.map(item => item.domain).filter(Boolean));
+    if (hosts.size > 0) return hosts.size;
+    return Number(result?.evidence_analysis?.independent_domains || 0);
+  }, [result, unifiedItems]);
 
   const confidence = Number(result?.confidence || 0);
-  const noResults = result && !result.error && !evidence.length && !sources.length;
-  const { summary, breakdown } = useMemo(() => splitReport(result?.explanation), [result?.explanation]);
+  const noResults = result && !result.error && !unifiedItems.length;
 
   async function copyMarkdownReport() {
     if (!result) return;
@@ -280,21 +272,11 @@ export default function Home() {
       `# Factygo Investigation Report`,
       `**Claim:** ${result.claim || text}`,
       `**Verdict:** ${label(result.verdict)} (${confidence}% confidence)`,
-      `**Independent Domains:** ${domains}`,
+      `**Summary:** ${result.explanation}`,
+      `**Evidence:** ${supporting.length} supporting · ${contradicting.length} contradicting · ${contextual.length} contextual (${domains} independent domains)`,
       ``,
-      `## Summary`,
-      summary,
-      ``,
-      `## Verdict Breakdown`,
-      breakdown,
-      ``,
-      `## Evidence Counts`,
-      `- Supporting: ${supporting.length}`,
-      `- Contradicting: ${contradicting.length}`,
-      `- Contextual: ${contextual.length}`,
-      ``,
-      `## Sources (${sources.length})`,
-      ...sources.map((s, idx) => `${idx + 1}. [${s.title || s.url}](${s.url})`),
+      `## Sources (${unifiedItems.length})`,
+      ...unifiedItems.map((item, idx) => `${idx + 1}. [${item.title}](${item.url}) — ${item.publisher}`),
     ];
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
@@ -412,6 +394,7 @@ export default function Home() {
 
       {result && !result.error && (
         <section className="investigationCard">
+          {/* 1. Unified Hero & Metadata Strip (Verdict + Claim + Analysis Combined) */}
           <div className="resultHero">
             <div className="verdictBlock">
               <div className="verdictTopRow">
@@ -428,12 +411,39 @@ export default function Home() {
                   {copied ? "✓ Copied Report" : "⧉ Copy Report"}
                 </button>
               </div>
-              <h2>{renderWithCitations(summary, evidenceById, sources)}</h2>
-              <div className="metaLine">
-                <span>{label(result.status || "complete")}</span>
-                <span>•</span>
-                <span>{domains} independent {domains === 1 ? "domain" : "domains"}</span>
+
+              <h2 className="directResultHeadline">
+                {renderWithCitations(result.explanation, evidenceById, sources)}
+              </h2>
+
+              <div className="unifiedMetaStrip">
+                <span className="metaPill">Scope: {label(result.claim_analysis?.jurisdiction || "GLOBAL")}</span>
+                <span className="metaPill">Domain: {label(result.claim_analysis?.domain || result.claim_analysis?.subject || "GENERAL")}</span>
+                <span className="metaPill">{domains} Independent {domains === 1 ? "Domain" : "Domains"}</span>
+                {result.claim_analysis?.year && <span className="metaPill">Year: {result.claim_analysis.year}</span>}
               </div>
+
+              {ratio.total > 0 && (
+                <div className="ratioWrap compactRatio">
+                  <div className="ratioLegend">
+                    <span>Evidence Consensus</span>
+                    <span>
+                      {supporting.length} supporting · {contradicting.length} contradicting · {contextual.length} context
+                    </span>
+                  </div>
+                  <div className="ratioBar" role="img" aria-label="Evidence stance distribution">
+                    {ratio.sup > 0 && (
+                      <div className="ratioSeg sup" style={{ width: ratio.sup + "%" }} title={`Supporting: ${supporting.length}`} />
+                    )}
+                    {ratio.con > 0 && (
+                      <div className="ratioSeg con" style={{ width: ratio.con + "%" }} title={`Contradicting: ${contradicting.length}`} />
+                    )}
+                    {ratio.ctx > 0 && (
+                      <div className="ratioSeg ctx" style={{ width: ratio.ctx + "%" }} title={`Contextual: ${contextual.length}`} />
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className={"confidenceMeter " + confidenceTone(confidence)}>
@@ -444,151 +454,36 @@ export default function Home() {
             </div>
           </div>
 
-          <nav className="tabBar" aria-label="Investigation sections">
-            {tabs.map(([id, name]) => (
-              <button
-                key={id}
-                className={tab === id ? "active" : ""}
-                onClick={() => setTab(id)}
-              >
-                {name}
-                {id === "evidence" ? " (" + evidence.length + ")" : ""}
-                {id === "sources" ? " (" + sources.length + ")" : ""}
-              </button>
-            ))}
-          </nav>
-
-          {tab === "verdict" && (
-            <div className="tabPanel">
-              <div className="sectionHeader">
-                <span className="sectionKicker">CONCLUSION</span>
-                <h3>Verdict Breakdown</h3>
+          {/* 2. Unified Clickable Web Sources & Evidence List */}
+          <div className="unifiedBody">
+            <div className="sectionHeaderRow">
+              <div>
+                <span className="sectionKicker">VERIFIED WEB SOURCES & EVIDENCE</span>
+                <h3>Web Sources ({unifiedItems.length})</h3>
               </div>
-
-              {noResults ? (
-                <div className="emptyBox">
-                  <div className="emptyIcon">?</div>
-                  <strong>No sufficiently relevant evidence</strong>
-                  <p>Factygo could not retrieve enough reliable web evidence to determine whether this claim is true or false. It will not invent a verdict.</p>
-                  <button className="secondaryButton" onClick={() => investigate()}>Search again</button>
-                </div>
-              ) : (
-                <>
-                  <p className="leadText">{renderWithCitations(breakdown, evidenceById, sources)}</p>
-
-                  {ratio.total > 0 && (
-                    <div className="ratioWrap">
-                      <div className="ratioLegend">
-                        <span>Evidence Distribution</span>
-                        <span>
-                          {supporting.length} supporting · {contradicting.length} contradicting · {contextual.length} context
-                        </span>
-                      </div>
-                      <div className="ratioBar" role="img" aria-label="Evidence stance distribution">
-                        {ratio.sup > 0 && (
-                          <div className="ratioSeg sup" style={{ width: ratio.sup + "%" }} title={`Supporting: ${supporting.length}`} />
-                        )}
-                        {ratio.con > 0 && (
-                          <div className="ratioSeg con" style={{ width: ratio.con + "%" }} title={`Contradicting: ${contradicting.length}`} />
-                        )}
-                        {ratio.ctx > 0 && (
-                          <div className="ratioSeg ctx" style={{ width: ratio.ctx + "%" }} title={`Contextual: ${contextual.length}`} />
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="statGrid">
-                    <div className="statBox"><span>SUPPORTING</span><strong>{supporting.length}</strong></div>
-                    <div className="statBox"><span>CONTRADICTING</span><strong>{contradicting.length}</strong></div>
-                    <div className="statBox"><span>CONTEXT</span><strong>{contextual.length}</strong></div>
-                    <div className="statBox"><span>SOURCES</span><strong>{sources.length}</strong></div>
-                  </div>
-                  <div className="infoNote">
-                    <span className="infoBadge">i</span>
-                    <div>
-                      <strong>Evidence overview</strong>
-                      <p>
-                        {supporting.length
-                          ? supporting.length + " supporting item" + (supporting.length === 1 ? "" : "s") + " found."
-                          : "No direct supporting evidence found."}{" "}
-                        {contradicting.length
-                          ? contradicting.length + " contradiction" + (contradicting.length === 1 ? "" : "s") + " detected."
-                          : "No direct contradiction detected."}
-                      </p>
-                    </div>
-                  </div>
-                </>
-              )}
+              <span className="clickHint">Click any card to open original source ↗</span>
             </div>
-          )}
 
-          {tab === "evidence" && (
-            <div className="tabPanel">
-              <div className="sectionHeader">
-                <span className="sectionKicker">WEB RESEARCH</span>
-                <h3>Evidence ({evidence.length} items)</h3>
+            {noResults ? (
+              <div className="emptyBox">
+                <div className="emptyIcon">?</div>
+                <strong>No sufficiently relevant evidence</strong>
+                <p>Factygo could not retrieve enough reliable web evidence to determine whether this claim is true or false.</p>
+                <button className="secondaryButton" onClick={() => investigate()}>Search again</button>
               </div>
-              {evidence.length ? (
-                <div className="cardStack">
-                  {evidence.map((e, i) => {
-                    const eid = e.evidence_id || `E${String(i + 1).padStart(2, "0")}`;
-                    return (
-                      <article className="evidenceCard" key={e.id || eid}>
-                        <div className="cardTopRow">
-                          <div className="pillGroup">
-                            <span className="idBadge">{eid}</span>
-                            <span className={"stance " + String(e.stance).toLowerCase()}>{label(e.stance)}</span>
-                          </div>
-                          <div className="pillGroup">
-                            {e.relevance != null && (
-                              <span className="metaPill">
-                                Relevance {Math.round(Number(e.relevance) <= 1 ? Number(e.relevance) * 100 : Number(e.relevance))}%
-                              </span>
-                            )}
-                            {e.strength != null && (
-                              <span className="metaPill">
-                                Strength {Math.round(Number(e.strength) <= 1 ? Number(e.strength) * 100 : Number(e.strength))}%
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <blockquote className="excerptText">“{e.excerpt}”</blockquote>
-                        {e.reason && <p className="reasonText">{e.reason}</p>}
-                        {e.source_url && (
-                          <a className="sourceLink" href={e.source_url} target="_blank" rel="noreferrer">
-                            Open original source ↗
-                          </a>
-                        )}
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="emptyBox">
-                  <div className="emptyIcon">⌕</div>
-                  <strong>No web evidence</strong>
-                  <p>No sufficiently relevant evidence was retrieved.</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {tab === "sources" && (
-            <div className="tabPanel">
-              <div className="sectionHeader">
-                <span className="sectionKicker">WEB RESEARCH</span>
-                <h3>Sources ({sources.length} sources)</h3>
-              </div>
-              {sources.length ? (
-                <div className="cardStack">
-                  {sources.map((s, i) => {
-                    const displayDomain = extractDomain(s.url, s.domain);
-                    const faviconUrl = displayDomain
-                      ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(displayDomain)}&sz=32`
-                      : "";
-                    return (
-                      <article className="sourceCard" key={s.url || i}>
+            ) : (
+              <div className="cardStack">
+                {unifiedItems.map((item) => {
+                  const faviconUrl = item.domain && item.domain.includes(".")
+                    ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(item.domain)}&sz=32`
+                    : "";
+                  const CardTag = item.url ? "a" : "div";
+                  const linkProps = item.url
+                    ? { href: item.url, target: "_blank", rel: "noreferrer" }
+                    : {};
+                  return (
+                    <CardTag key={item.id} className="unifiedSourceCard" {...linkProps}>
+                      <div className="unifiedCardHeader">
                         <div className="sourceIdentity">
                           {faviconUrl ? (
                             <img
@@ -602,137 +497,70 @@ export default function Home() {
                           ) : (
                             <span className="sourceFaviconFallback">🌐</span>
                           )}
-                          <div className="sourceMain">
-                            <a className="sourceTitle" href={s.url} target="_blank" rel="noreferrer">
-                              {s.title || s.url} ↗
-                            </a>
-                            <span className="sourceDomain">{displayDomain || "Unknown domain"}</span>
+                          <div className="sourceTitleBlock">
+                            <span className="unifiedCardTitle">
+                              {item.title} {item.url && <span className="extArrow">↗</span>}
+                            </span>
+                            <span className="unifiedCardPublisher">
+                              {item.publisher}{item.domain && item.publisher.toLowerCase() !== item.domain.toLowerCase() ? ` · ${item.domain}` : ""}
+                            </span>
                           </div>
                         </div>
+
                         <div className="pillGroup">
-                          {s.source_type && <span className="authorityPill">{s.source_type}</span>}
-                          {s.source_tier && <span className="metaPill">Tier {s.source_tier}</span>}
-                          {s.source_score != null && (
-                            <span className="metaPill">{Math.round(s.source_score * 100)}/100</span>
-                          )}
+                          <span className="idBadge">{item.id}</span>
+                          <span className={"stance " + item.stance}>{label(item.stance)}</span>
+                          <span className="authorityPill">{item.sourceType}</span>
+                          <span className="metaPill">{Math.round(Number(item.score) * 100)}/100</span>
                         </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="emptyBox">
-                  <div className="emptyIcon">◎</div>
-                  <strong>No sources retrieved</strong>
-                  <p>Factygo has no sources to display for this investigation.</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {tab === "claim" && (
-            <div className="tabPanel">
-              <div className="sectionHeader">
-                <span className="sectionKicker">CLAIM UNDERSTANDING</span>
-                <h3>Claim</h3>
-              </div>
-              <p className="leadText">{result.claim || text}</p>
-              {result.claim_analysis && (
-                <div className="statGrid">
-                  <div className="statBox"><span>SUBJECT</span><strong>{result.claim_analysis.subject || result.claim_analysis.domain || "Unknown"}</strong></div>
-                  <div className="statBox"><span>JURISDICTION</span><strong>{result.claim_analysis.jurisdiction || "Unknown"}</strong></div>
-                  <div className="statBox"><span>YEAR</span><strong>{result.claim_analysis.year || "Not specified"}</strong></div>
-                  <div className="statBox"><span>TYPE</span><strong>{label(result.claim_analysis.claim_type || result.claim_analysis.domain || "Unknown")}</strong></div>
-                </div>
-              )}
-              <h4 className="subHeading">Claim breakdown</h4>
-              {result.claims?.length ? (
-                <ul className="cleanList">
-                  {result.claims.map((c, idx) => (
-                    <li key={c.id || idx}>{c.text}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mutedText">No additional decomposition returned.</p>
-              )}
-            </div>
-          )}
-
-          {tab === "research" && (
-            <div className="tabPanel">
-              <div className="sectionHeader">
-                <span className="sectionKicker">RESEARCH PLAN</span>
-                <h3>Framed questions</h3>
-              </div>
-              <p className="mutedText">Each question is researched independently. These raw answers are evidence inputs for the final synthesis, not separate verdicts.</p>
-              <div className="cardStack">
-                {(result.research_questions || []).map((q) => (
-                  <article className="questionCard" key={q.id}>
-                    <div className="cardTopRow">
-                      <span className="qBadge">Q{q.id}</span>
-                      <span className="metaPill">
-                        {q.evidence_count} source{q.evidence_count === 1 ? "" : "s"} · {label(q.status)}
-                      </span>
-                    </div>
-                    <h4>{q.question}</h4>
-                    <p>{q.raw_answer || "No raw answer returned."}</p>
-                    {q.sources?.length > 0 && (
-                      <div className="pillGroup">
-                        {q.sources.map((source, idx) => (
-                          <a
-                            key={source.url || idx}
-                            className="sourceLink"
-                            href={source.url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {source.title || source.domain} ↗
-                          </a>
-                        ))}
                       </div>
-                    )}
-                  </article>
-                ))}
-              </div>
-            </div>
-          )}
 
-          {tab === "analysis" && (
-            <div className="tabPanel">
-              <div className="sectionHeader">
-                <span className="sectionKicker">INVESTIGATION INTELLIGENCE</span>
-                <h3>Analysis</h3>
+                      {item.excerpt && (
+                        <p className="unifiedExcerpt">“{item.excerpt}”</p>
+                      )}
+                      {item.reason && (
+                        <p className="unifiedReason">{item.reason}</p>
+                      )}
+                    </CardTag>
+                  );
+                })}
               </div>
-              <div className="statGrid">
-                <div className="statBox"><span>SUPPORTING</span><strong>{supporting.length}</strong></div>
-                <div className="statBox"><span>CONTRADICTING</span><strong>{contradicting.length}</strong></div>
-                <div className="statBox"><span>CONTEXTUAL</span><strong>{contextual.length}</strong></div>
-                <div className="statBox"><span>INDEPENDENT DOMAINS</span><strong>{domains}</strong></div>
-              </div>
-              {result.evidence_analysis && (
-                <div className="infoNote">
-                  <span className="infoBadge">i</span>
-                  <div>
-                    <strong>Corroboration</strong>
-                    <p>
-                      {result.evidence_analysis.supporting_domains?.length || supporting.length} supporting ·{" "}
-                      {result.evidence_analysis.contradicting_domains?.length || contradicting.length} contradicting
-                    </p>
-                  </div>
+            )}
+
+            {/* 3. Collapsible Research Queries & Methodology Drawer */}
+            <details className="researchDrawer">
+              <summary>
+                <span>Research queries & methodology ({(result.research_questions || []).length} queries)</span>
+                <span className="drawerChevron">▾</span>
+              </summary>
+              <div className="drawerContent">
+                <div className="drawerClaimBox">
+                  <strong>Investigated Input:</strong> {result.claim || text}
                 </div>
-              )}
-              {result.methodology?.length > 0 && (
-                <>
-                  <h4 className="subHeading">Methodology</h4>
-                  <ul className="cleanList">
-                    {result.methodology.map((m, i) => (
-                      <li key={i}>{m}</li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </div>
-          )}
+
+                {(result.research_questions || []).map((q) => (
+                  <div className="drawerQuestionItem" key={q.id}>
+                    <div className="drawerQHeader">
+                      <span className="qBadge">Q{q.id}</span>
+                      <strong>{q.question}</strong>
+                    </div>
+                    <p>{q.raw_answer}</p>
+                  </div>
+                ))}
+
+                {result.methodology?.length > 0 && (
+                  <div className="drawerMethodology">
+                    <strong>Verification Pipeline</strong>
+                    <ul>
+                      {result.methodology.map((m, i) => (
+                        <li key={i}>{m}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </details>
+          </div>
         </section>
       )}
 

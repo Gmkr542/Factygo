@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import re
 from urllib.parse import parse_qsl, quote_plus, urlencode, urlparse, urlunparse
@@ -39,6 +40,11 @@ _STOPWORDS = {
     "were", "will", "with", "without", "against", "about", "into", "than", "then", "they",
     "them", "there", "these", "those", "what", "when", "where", "which", "who", "why", "how",
 }
+
+
+def _clean_text(value: str) -> str:
+    unescaped = html.unescape(str(value or ""))
+    return " ".join(unescaped.replace("\xa0", " ").split()).strip()
 
 
 def _quality(source_type: str) -> tuple[int, str, int]:
@@ -81,14 +87,19 @@ def _normalise(results: list[dict]) -> list[dict]:
         if not canonical or canonical in seen:
             continue
         seen.add(canonical)
-        title = str(x.get("title", ""))[:300]
-        publisher = str(x.get("publisher") or urlparse(u).netloc.removeprefix("www.")).strip()
-        st = source_type_for(title, publisher, u)
+        title = _clean_text(x.get("title", ""))[:300]
+        domain = str(x.get("domain") or "").strip().lower().removeprefix("www.")
+        if not domain:
+            domain = urlparse(u).netloc.lower().removeprefix("www.")
+        publisher = _clean_text(x.get("publisher") or domain)
+        st = source_type_for(title, publisher, f"https://{domain}" if domain else u)
         quality, tier_label, tier_num = _quality(st)
-        content = str(x.get("body") or x.get("description") or x.get("content") or "")[:5000]
+        raw_body = x.get("body") or x.get("description") or x.get("content") or ""
+        content = _clean_text(re.sub(r"<[^>]+>", " ", str(raw_body)))[:5000]
         out.append({
             "title": title,
             "url": u,
+            "domain": domain,
             "content": content,
             "text": content,
             "publisher": publisher,
@@ -153,19 +164,88 @@ async def _google_news(query: str, max_results: int) -> list[dict]:
 
     results = []
     for item in root.findall(".//item")[:max_results]:
-        raw_title = item.findtext("title") or ""
+        raw_title = _clean_text(item.findtext("title") or "")
         source_el = item.find("source")
-        source_name = (source_el.text or "").strip() if source_el is not None else ""
-        source_url = source_el.attrib.get("url", "") if source_el is not None else ""
+        source_name = _clean_text(source_el.text or "") if source_el is not None else ""
+        source_url = source_el.attrib.get("url", "").strip() if source_el is not None else ""
+        real_domain = urlparse(source_url).netloc.lower().removeprefix("www.") if source_url else ""
         if not source_name and " - " in raw_title:
             source_name = raw_title.rsplit(" - ", 1)[-1].strip()
-        desc = re.sub(r"<[^>]+>", " ", item.findtext("description") or "").strip()
+        desc = _clean_text(re.sub(r"<[^>]+>", " ", item.findtext("description") or ""))
         results.append({
             "title": raw_title,
             "url": item.findtext("link") or source_url,
-            "publisher": source_name or "Google News",
+            "domain": real_domain or source_name.lower(),
+            "publisher": source_name or real_domain or "News Source",
             "body": desc or raw_title,
         })
+    return _normalise(results)
+
+
+async def _pubmed_fallback(query: str, max_results: int = 3) -> list[dict]:
+    keywords = " ".join(sorted(_terms(query)))
+    if not keywords:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=get_settings().search_timeout, headers={"User-Agent": "Factygo/1.1"}) as client:
+            sr = await client.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                params={"db": "pubmed", "term": keywords, "retmode": "json", "retmax": max_results},
+            )
+            sr.raise_for_status()
+            ids = sr.json().get("esearchresult", {}).get("idlist", [])
+            if not ids:
+                return []
+            sm = await client.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+                params={"db": "pubmed", "id": ",".join(ids), "retmode": "json"},
+            )
+            sm.raise_for_status()
+            rmap = sm.json().get("result", {})
+    except Exception:
+        return []
+
+    results = []
+    for pmid in ids:
+        entry = rmap.get(pmid)
+        if isinstance(entry, dict) and entry.get("title"):
+            title = _clean_text(entry["title"])
+            src = _clean_text(entry.get("source", "PubMed"))
+            results.append({
+                "title": title,
+                "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+                "domain": "pubmed.ncbi.nlm.nih.gov",
+                "publisher": src,
+                "body": f"{title} Published in {src} ({entry.get('pubdate', '')}).",
+            })
+    return _normalise(results)
+
+
+async def _wikipedia_fallback(query: str, max_results: int = 3) -> list[dict]:
+    keywords = " ".join(list(_terms(query))[:6]) or query[:100]
+    try:
+        async with httpx.AsyncClient(timeout=get_settings().search_timeout, headers={"User-Agent": "Factygo/1.1"}) as client:
+            r = await client.get(
+                "https://en.wikipedia.org/w/api.php",
+                params={"action": "query", "list": "search", "srsearch": keywords, "format": "json", "srlimit": max_results},
+            )
+            r.raise_for_status()
+            hits = r.json().get("query", {}).get("search", [])
+    except Exception:
+        return []
+
+    results = []
+    for hit in hits:
+        title = _clean_text(hit.get("title", ""))
+        snippet = _clean_text(re.sub(r"<[^>]+>", " ", str(hit.get("snippet", ""))))
+        if title:
+            results.append({
+                "title": f"{title} - Wikipedia",
+                "url": f"https://en.wikipedia.org/wiki/{quote_plus(title.replace(' ', '_'))}",
+                "domain": "en.wikipedia.org",
+                "publisher": "Wikipedia",
+                "body": snippet or title,
+            })
     return _normalise(results)
 
 
@@ -196,7 +276,6 @@ def _score_relevance(query: str, item: dict) -> int:
 
 
 def _clean_search_query(query: str) -> str:
-    # Strip verbose FactyGo framing prefixes so search engines receive crisp keywords
     cleaned = re.sub(
         r"^(?:what authoritative sources establish the factual status of:|"
         r"what primary or original source evidence is available for:|"
@@ -231,12 +310,17 @@ async def search_web(query: str, max_results: int | None = None, resource_plan: 
 
     ddgs_task = asyncio.gather(*[_ddgs(q, min(max_results, 8)) for q in provider_queries[:2]], return_exceptions=True)
     news_task = asyncio.gather(*[_google_news(q, min(max_results, 8)) for q in provider_queries[:2]], return_exceptions=True)
-    ddgs_batches, news_batches = await asyncio.gather(ddgs_task, news_task)
+    pubmed_task = _pubmed_fallback(base_q, max_results=3)
+    ddgs_batches, news_batches, pubmed_results = await asyncio.gather(ddgs_task, news_task, pubmed_task)
 
     combined = []
     for batch in list(ddgs_batches) + list(news_batches):
         if isinstance(batch, list):
             combined.extend(batch)
+    if isinstance(pubmed_results, list):
+        combined.extend(pubmed_results)
+    if len(combined) < 3:
+        combined.extend(await _wikipedia_fallback(base_q, max_results=3))
 
     results = _normalise(combined)
     for item in results:
@@ -253,7 +337,7 @@ async def search_web(query: str, max_results: int | None = None, resource_plan: 
     for item in ranked:
         if item["url"] in seen_urls:
             continue
-        pub = item["publisher"].lower()
+        pub = (item.get("domain") or item["publisher"]).lower()
         if pub in seen_publishers and item["source_quality"] < 90:
             continue
         out.append(item)
@@ -284,6 +368,7 @@ class ResearchService:
             normalized.append({
                 "title": doc.get("title", "Untitled"),
                 "url": url,
+                "domain": doc.get("domain", ""),
                 "publisher": doc.get("publisher", ""),
                 "source_type": doc.get("source_type", "Web Source"),
                 "source_quality": doc.get("source_quality", 65),

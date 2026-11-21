@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from urllib.parse import urlparse
 
@@ -22,9 +23,11 @@ _CACHE_TTL_SECONDS = 3600  # 1 hour cache so repeat/demo clicks use 0 Groq token
 
 _DOMAIN_BY_CATEGORY = {
     "health": ["pubmed.ncbi.nlm.nih.gov", "who.int", "nih.gov"],
+    "health_science": ["pubmed.ncbi.nlm.nih.gov", "who.int", "nih.gov"],
     "medical": ["pubmed.ncbi.nlm.nih.gov", "who.int", "nih.gov"],
     "science": ["nature.com", "pubmed.ncbi.nlm.nih.gov", "arxiv.org"],
     "finance": ["imf.org", "worldbank.org", "sec.gov"],
+    "economics_finance": ["imf.org", "worldbank.org", "sec.gov"],
     "politics": ["reuters.com", "apnews.com", "bbc.com"],
 }
 
@@ -34,21 +37,30 @@ def _raw_answer(question: str, documents: list[dict]) -> str:
         return "No source page was retrieved for this research question."
     top = documents[0]
     snippet = str(top.get("content") or top.get("text") or "").strip()[:260]
-    domain = urlparse(top.get("url", "")).netloc.removeprefix("www.")
+    domain = top.get("domain") or urlparse(top.get("url", "")).netloc.removeprefix("www.")
     if not snippet:
         snippet = top.get("title", "Relevant source found.")
     return f"{snippet} ({top.get('title', 'Source')} — {domain})"
 
 
 def _format_quick_report(verdict: str, claim: str, raw_text: str) -> str:
-    cleaned = str(raw_text or "").strip()
-    if "Result :" in cleaned and "Breakdown:" in cleaned:
-        return cleaned
+    cleaned = " ".join(str(raw_text or "").split()).strip()
     title_verdict = verdict.title()
-    return (
-        f"Result : {title_verdict}, {cleaned}\n\n"
-        f"Breakdown: Evaluated against top retrieved primary and scientific sources for \"{claim[:100]}\"."
+    # Strip existing Result prefix to normalize cleanly
+    cleaned = re.sub(r"^Result\s*:\s*[A-Za-z ]+,\s*", "", cleaned, flags=re.I)
+    # Strip robotic meta-filler if the LLM still includes it
+    cleaned = re.sub(
+        r"^(?:the claim that\s+.+?\s+is\s+(?:contradicted|supported|refuted)\s+by\s+.+?(?:indicating|showing|stating)\s+that\s+)",
+        "",
+        cleaned,
+        flags=re.I,
     )
+    cleaned = re.sub(r",?\s*making the claim (?:false|true|misleading)\.?$", ".", cleaned, flags=re.I)
+    if cleaned:
+        cleaned = cleaned[0].upper() + cleaned[1:]
+    else:
+        cleaned = f"Evaluated against top retrieved primary sources for \"{claim[:100]}\"."
+    return f"Result : {title_verdict}, {cleaned}"
 
 
 def _compute_analysis(evidence: list[dict], base_analysis: dict | None = None) -> dict:
@@ -56,9 +68,9 @@ def _compute_analysis(evidence: list[dict], base_analysis: dict | None = None) -
     supporting = [e for e in evidence if str(e.get("stance", "")).lower() == "supporting"]
     contradicting = [e for e in evidence if str(e.get("stance", "")).lower() == "contradicting"]
     domains = {
-        urlparse(str(e.get("source_url", ""))).netloc.lower().removeprefix("www.")
+        (e.get("domain") or urlparse(str(e.get("source_url", ""))).netloc).lower().removeprefix("www.")
         for e in evidence
-        if e.get("source_url")
+        if e.get("domain") or e.get("source_url")
     }
     domains.discard("")
     analysis["supporting_count"] = len(supporting)
@@ -134,6 +146,12 @@ async def investigate_async(text: str) -> InvestigationResponse:
         text,
         llm_assessments=llm_synthesis.get("evidence_assessments"),
     )
+
+    # Propagate resolved publisher domains into evidence items
+    doc_domain_by_url = {d.get("url"): d.get("domain", "") for d in documents if d.get("url")}
+    for ev in evidence:
+        if not ev.get("domain") and ev.get("source_url"):
+            ev["domain"] = doc_domain_by_url.get(ev["source_url"], "")
 
     if llm_synthesis and llm_synthesis.get("verdict"):
         verdict_label = str(llm_synthesis["verdict"]).upper()

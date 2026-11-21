@@ -398,7 +398,7 @@ textarea::placeholder {
   color: var(--red);
 }
 
-/* Result Card */
+/* Unified Zero-Tab Result Card */
 .investigationCard {
   margin-top: 24px;
   background: var(--surface);
@@ -414,6 +414,8 @@ textarea::placeholder {
   align-items: flex-start;
   gap: 24px;
   padding: 28px 28px 22px;
+  background: #fcfcfd;
+  border-bottom: 1px solid var(--line);
 }
 
 .verdictBlock {
@@ -445,7 +447,7 @@ textarea::placeholder {
 .verdictBadge.warn { background: var(--amber-bg); color: var(--amber); }
 .verdictBadge.neutral { background: var(--line-soft); color: var(--ink-secondary); }
 
-.verdictDot, .statusDot {
+.verdictDot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -457,7 +459,7 @@ textarea::placeholder {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: #f9fafb;
+  background: var(--surface);
   border: 1px solid var(--line);
   color: var(--ink-secondary);
   border-radius: 999px;
@@ -479,14 +481,21 @@ textarea::placeholder {
   color: var(--green);
 }
 
-.verdictBlock h2 {
+.directResultHeadline {
   font-family: "Inter", sans-serif;
   font-size: 18px;
   font-weight: 600;
   line-height: 1.55;
   letter-spacing: -0.015em;
   color: var(--ink);
-  margin: 14px 0 10px;
+  margin: 14px 0 14px;
+}
+
+.unifiedMetaStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
 }
 
 /* Inline Clickable Citation Pills */
@@ -521,14 +530,39 @@ a.citationPill:hover {
   transform: translateY(-1px);
 }
 
-.metaLine, .resultMeta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--muted);
+/* Visual Evidence Distribution Ratio Bar */
+.compactRatio {
+  margin-top: 10px;
 }
+
+.ratioLegend {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.ratioBar {
+  display: flex;
+  height: 7px;
+  width: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--line-soft);
+  gap: 2px;
+}
+
+.ratioSeg {
+  height: 100%;
+  transition: width 0.35s ease;
+}
+
+.ratioSeg.sup { background: #1e8e3e; }
+.ratioSeg.con { background: #d93025; }
+.ratioSeg.ctx { background: #94a3b8; }
 
 /* Confidence Ring */
 .confidenceMeter {
@@ -555,7 +589,7 @@ a.citationPill:hover {
   background: conic-gradient(#9ca3af var(--confidence), #eef2f6 0);
 }
 
-.confidenceInner, .confidenceRing > div {
+.confidenceInner {
   width: 56px;
   height: 56px;
   border-radius: 50%;
@@ -569,58 +603,25 @@ a.citationPill:hover {
   color: var(--ink);
 }
 
-.confidenceLabel, .confidenceMeter > span {
+.confidenceLabel {
   font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--muted);
 }
 
-/* Segmented Pill Tabs */
-.tabBar, .tabs {
+/* Unified Body & Clickable Web Sources + Evidence Cards */
+.unifiedBody {
+  padding: 24px 28px 28px;
+}
+
+.sectionHeaderRow {
   display: flex;
-  gap: 4px;
-  overflow-x: auto;
-  padding: 6px 24px;
-  background: #f9fafb;
-  border-top: 1px solid var(--line-soft);
-  border-bottom: 1px solid var(--line);
-  scrollbar-width: none;
-}
-
-.tabBar::-webkit-scrollbar, .tabs::-webkit-scrollbar { display: none; }
-
-.tabBar button, .tabs button {
-  background: transparent;
-  border: 0;
-  border-radius: 999px;
-  padding: 7px 14px;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--muted);
-  white-space: nowrap;
-  transition: all 0.15s ease;
-}
-
-.tabBar button:hover, .tabs button:hover {
-  color: var(--ink);
-  background: rgba(0, 0, 0, 0.04);
-}
-
-.tabBar button.active, .tabs button.active {
-  background: var(--surface);
-  color: var(--ink);
-  font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-/* Panels */
-.tabPanel, .panel {
-  padding: 26px 28px 30px;
-}
-
-.sectionHeader {
-  margin-bottom: 14px;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
 .sectionKicker {
@@ -632,7 +633,7 @@ a.citationPill:hover {
   margin-bottom: 4px;
 }
 
-.tabPanel h3, .panel h3 {
+.sectionHeaderRow h3 {
   font-family: "Plus Jakarta Sans", sans-serif;
   font-size: 18px;
   font-weight: 700;
@@ -640,141 +641,103 @@ a.citationPill:hover {
   letter-spacing: -0.015em;
 }
 
-.leadText, .lead {
-  font-size: 14.5px;
-  line-height: 1.7;
-  color: var(--ink-secondary);
-  margin: 0 0 22px;
-}
-
-/* Visual Evidence Distribution Ratio Bar */
-.ratioWrap {
-  margin: 18px 0 14px;
-}
-
-.ratioLegend {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 11px;
-  font-weight: 600;
+.clickHint {
+  font-size: 11.5px;
   color: var(--muted);
-  margin-bottom: 6px;
 }
 
-.ratioBar {
-  display: flex;
-  height: 8px;
-  width: 100%;
-  border-radius: 999px;
-  overflow: hidden;
-  background: var(--line-soft);
-  gap: 2px;
-}
-
-.ratioSeg {
-  height: 100%;
-  transition: width 0.35s ease;
-}
-
-.ratioSeg.sup { background: #1e8e3e; }
-.ratioSeg.con { background: #d93025; }
-.ratioSeg.ctx { background: #94a3b8; }
-
-/* Clean Stat Strip */
-.statGrid, .summaryGrid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin: 14px 0 20px;
-}
-
-.statBox, .summaryGrid div {
-  background: #f9fafb;
-  border: 1px solid var(--line-soft);
-  border-radius: 12px;
-  padding: 12px 14px;
-}
-
-.statBox span, .summaryGrid span {
-  display: block;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  margin-bottom: 4px;
-}
-
-.statBox strong, .summaryGrid strong {
-  font-family: "Plus Jakarta Sans", sans-serif;
-  font-size: 19px;
-  font-weight: 700;
-  color: var(--ink);
-}
-
-/* Insight Banner */
-.infoNote, .quickInsight {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  background: #f8fafc;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 13px 15px;
-  margin-top: 16px;
-}
-
-.infoBadge, .insightIcon {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
-  display: grid;
-  place-items: center;
-  font-size: 11px;
-  font-weight: 700;
-  flex: none;
-  margin-top: 1px;
-}
-
-.infoNote strong, .quickInsight strong {
-  font-size: 12.5px;
-  color: var(--ink);
-}
-
-.infoNote p, .quickInsight p {
-  margin: 3px 0 0;
-  font-size: 12.5px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-/* Evidence & Source Cards */
 .cardStack {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.evidenceCard, .questionCard {
+.unifiedSourceCard {
+  display: block;
+  text-decoration: none;
+  color: inherit;
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 16px 18px;
   background: var(--surface);
-  transition: border-color 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
 }
 
-.evidenceCard:hover, .questionCard:hover {
-  border-color: #d1d5db;
+a.unifiedSourceCard:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 6px 18px rgba(26, 115, 232, 0.07);
+  transform: translateY(-1px);
 }
 
-.cardTopRow {
+.unifiedCardHeader {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
+}
+
+.sourceIdentity {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.sourceFavicon {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  flex: none;
+  margin-top: 2px;
+  object-fit: contain;
+}
+
+.sourceFaviconFallback {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  flex: none;
+}
+
+.sourceTitleBlock {
+  min-width: 0;
+  flex: 1;
+}
+
+.unifiedCardTitle {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+a.unifiedSourceCard:hover .unifiedCardTitle {
+  color: var(--accent);
+}
+
+.extArrow {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.unifiedCardPublisher {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.pillGroup {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .idBadge {
@@ -802,13 +765,6 @@ a.citationPill:hover {
 .stance.contradicting { background: var(--red-bg); color: var(--red); }
 .stance.contextual, .qBadge { background: var(--line-soft); color: var(--ink-secondary); }
 
-.pillGroup {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
 .metaPill {
   font-size: 10.5px;
   font-weight: 500;
@@ -828,112 +784,103 @@ a.citationPill:hover {
   border-radius: 6px;
 }
 
-.excerptText {
-  font-size: 14px;
-  line-height: 1.65;
+.unifiedExcerpt {
+  margin: 12px 0 6px;
+  padding-left: 12px;
+  border-left: 2.5px solid #dbeafe;
+  font-size: 13.5px;
+  line-height: 1.6;
   color: var(--ink);
-  margin: 12px 0 8px;
 }
 
-.reasonText, .mutedText {
-  font-size: 12.5px;
-  color: var(--muted);
-  line-height: 1.55;
-  margin: 0 0 10px;
-}
-
-.sourceLink {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.unifiedReason {
+  margin: 6px 0 0;
   font-size: 12px;
-  font-weight: 600;
-  color: var(--accent);
-  text-decoration: none;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
-.sourceLink:hover { text-decoration: underline; }
+/* Collapsible Research & Methodology Drawer */
+.researchDrawer {
+  margin-top: 22px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f9fafb;
+  overflow: hidden;
+}
 
-.sourceCard {
+.researchDrawer summary {
+  list-style: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 13px 16px;
+  padding: 12px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  cursor: pointer;
+}
+
+.researchDrawer summary::-webkit-details-marker { display: none; }
+.researchDrawer summary:hover { color: var(--ink); background: #f3f4f6; }
+
+.drawerContent {
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--line);
   background: var(--surface);
-  transition: border-color 0.15s ease, background 0.15s ease;
+  font-size: 13px;
+  color: var(--ink-secondary);
 }
 
-.sourceCard:hover {
-  border-color: #c2d7fa;
-  background: #fafcff;
+.drawerClaimBox {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid var(--line-soft);
+  margin-bottom: 12px;
 }
 
-.sourceIdentity {
+.drawerQuestionItem {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.drawerQuestionItem:last-of-type { border-bottom: 0; }
+
+.drawerQHeader {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-width: 0;
-  flex: 1;
-}
-
-.sourceFavicon {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  flex: none;
-  object-fit: contain;
-}
-
-.sourceFaviconFallback {
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
-  font-size: 13px;
-  flex: none;
-}
-
-.sourceMain {
-  min-width: 0;
-  flex: 1;
-}
-
-.sourceTitle {
-  display: block;
-  font-size: 13.5px;
-  font-weight: 600;
+  gap: 8px;
+  margin-bottom: 4px;
   color: var(--ink);
-  text-decoration: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.sourceTitle:hover { color: var(--accent); }
-
-.sourceDomain {
-  display: block;
-  margin-top: 3px;
-  font-size: 11.5px;
+.drawerQuestionItem p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
   color: var(--muted);
 }
 
-.subHeading {
-  font-size: 13px;
-  font-weight: 600;
-  margin: 22px 0 10px;
-  color: var(--ink);
+.drawerMethodology {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
 }
 
-.cleanList {
+.drawerMethodology strong {
+  display: block;
+  font-size: 12px;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.drawerMethodology ul {
   margin: 0;
   padding-left: 18px;
-  font-size: 13.5px;
-  line-height: 1.7;
-  color: var(--ink-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--muted);
 }
 
 .emptyBox {
@@ -963,8 +910,6 @@ a.citationPill:hover {
 @media (max-width: 640px) {
   .hero h1 { font-size: 30px; }
   .resultHero { flex-direction: column; }
-  .statGrid, .summaryGrid { grid-template-columns: repeat(2, 1fr); }
   .searchFooter { flex-direction: column; align-items: stretch; }
   .primaryButton { width: 100%; }
-  .sourceCard { flex-direction: column; align-items: flex-start; }
 }

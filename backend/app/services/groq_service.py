@@ -292,15 +292,18 @@ RETRIEVED EVIDENCE:
 Rules:
 1. Choose verdict from: TRUE, MOSTLY TRUE, PARTLY TRUE, MISLEADING, MOSTLY FALSE, FALSE, UNVERIFIED.
 2. Compute integer confidence (0-100) based on evidence quality, directness, and independent corroboration.
-3. For each evidence item you use, classify stance as "supporting", "contradicting", or "contextual" with a 1-sentence reason and strength (0.0 to 1.0).
-4. Provide a concise answer for each research question grounded strictly in the evidence IDs.
-5. Write a clear, objective 2-4 sentence explanation for the final verdict.
+3. Write "explanation" in 1-2 short, direct sentences (under 55 words total) starting strictly with:
+   Result : <Title-case Verdict>, <direct factual statement answering or correcting the claim immediately with specific scientific/technical facts and evidence IDs like (E01)>.
+   - Example: "Result : False, India isn't less populated; it overtook China in 2023 to become the world's most populous country according to UN and Pew Research Center data (E01) (E02)."
+   - NEVER use filler phrases like "The claim that...", "Multiple sources indicate...", "Available evidence shows...", or "making the claim false". State the facts directly.
+4. For each evidence item you use, classify stance as "supporting", "contradicting", or "contextual" with a 1-sentence reason and strength (0.0 to 1.0).
+5. Provide a concise answer for each research question grounded strictly in the evidence IDs.
 
 Return ONLY valid JSON:
 {{
   "verdict": "TRUE|MOSTLY TRUE|PARTLY TRUE|MISLEADING|MOSTLY FALSE|FALSE|UNVERIFIED",
   "confidence": 0,
-  "explanation": "string",
+  "explanation": "Result : False, ...",
   "evidence_assessments": [
     {{"evidence_id": "E01", "stance": "supporting|contradicting|contextual", "strength": 0.85, "reason": "string"}}
   ],
