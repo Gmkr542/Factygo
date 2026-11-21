@@ -483,3 +483,7 @@ FACTYGO · Evidence-first AI investigation · Evidence over assumption
 
 );
 }
+
+<FollowUp>
+Use the **Copy** icon at the top-right of the code block, paste into **`frontend/app/page.js`**, and commit—let me know once **`factygo-web`** turns **Live**!
+</FollowUp>
