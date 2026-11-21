@@ -224,48 +224,7 @@ export default function Home() {
       if (r.ok) {
         const q = await r.json();
         quotaFetchedAtRef.current = Date.now();
-        setQuota(prev => {
-          try {
-            const storageKey = `factygo_quota_${q.utc_date || "today"}_${q.model || "default"}`;
-            const savedRaw = typeof window !== "undefined" ? window.localStorage.getItem(storageKey) : null;
-            const saved = savedRaw ? JSON.parse(savedRaw) : null;
-            const base = prev && prev.utc_date === q.utc_date ? prev : saved;
-            let merged = { ...q };
-            if (base && base.utc_date === q.utc_date) {
-              const prevTokUsed = Number(base.tokens_used_today ?? 0);
-              const nextTokUsed = Number(q.tokens_used_today ?? 0);
-              if (prevTokUsed > nextTokUsed) {
-                const effTokUsed = prevTokUsed;
-                const limTok = Number(q.limit_tokens_tpd ?? base.limit_tokens_tpd ?? 200000);
-                const remTok = Math.max(0, limTok - effTokUsed);
-                const tPct = limTok > 0 ? Math.round((remTok / limTok) * 100) : 100;
-                merged.tokens_used_today = effTokUsed;
-                merged.remaining_tokens_tpd = remTok;
-                merged.tpd_available_pct = tPct;
-                merged.tpd_used_pct = Math.max(0, Math.min(100, 100 - tPct));
-              }
-              const prevReqLeft = base.remaining_requests_rpd;
-              const nextReqLeft = q.remaining_requests_rpd;
-              if (typeof prevReqLeft === "number" && typeof nextReqLeft === "number" && nextReqLeft > prevReqLeft && prevTokUsed > 0) {
-                const limReq = Number(q.limit_requests_rpd ?? base.limit_requests_rpd ?? 1000);
-                merged.remaining_requests_rpd = prevReqLeft;
-                const rPct = limReq > 0 ? Math.round((prevReqLeft / limReq) * 100) : 100;
-                merged.rpd_available_pct = rPct;
-                merged.rpd_used_pct = Math.max(0, Math.min(100, 100 - rPct));
-              }
-              merged.daily_available_pct = Math.min(
-                merged.tpd_available_pct ?? 100,
-                merged.rpd_available_pct ?? 100
-              );
-            }
-            if (typeof window !== "undefined") {
-              window.localStorage.setItem(storageKey, JSON.stringify(merged));
-            }
-            return merged;
-          } catch {
-            return q;
-          }
-        });
+        setQuota(q);
       }
     } catch {
       // Ignore transient network errors during polling

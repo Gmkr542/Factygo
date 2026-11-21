@@ -40,49 +40,7 @@ _QUOTA_STATE: dict = {
 }
 
 
-_LAST_PERSISTED_USAGE: dict[str, tuple[int, int]] = {}
-
-
-def _quota_db_paths() -> list[str]:
-    import os
-    from pathlib import Path
-    s = get_settings()
-    candidates: list[str] = []
-    env_override = os.environ.get("FACTYGO_QUOTA_DB", "").strip()
-    if env_override:
-        candidates.append(env_override)
-    if s.database_url.startswith("sqlite:///"):
-        raw = s.database_url.replace("sqlite:///", "", 1)
-        candidates.append(raw)
-        candidates.append(str(Path(__file__).resolve().parents[3] / raw.lstrip("./")))
-    candidates.append(os.path.join("/tmp", "factygo_quota.db"))
-    seen: list[str] = []
-    for c in candidates:
-        if c and c not in seen:
-            seen.append(c)
-    return seen
-
-
-def _daily_db_conn():
-    import sqlite3
-    last_err: Exception | None = None
-    for db_path in _quota_db_paths():
-        try:
-            conn = sqlite3.connect(db_path, timeout=5.0)
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS daily_quota_usage (
-                    utc_date TEXT PRIMARY KEY,
-                    tokens_used INTEGER NOT NULL DEFAULT 0,
-                    requests_used INTEGER NOT NULL DEFAULT 0
-                )
-                """
-            )
-            conn.commit()
-            return conn
-        except Exception as exc:
-            last_err = exc
-    raise RuntimeError(f"Unable to open quota SQLite DB: {last_err}")
+_LIVE_USAGE_COUNTER: dict[str, tuple[int, int]] = {}
 
 
 def _utc_today() -> str:
@@ -92,133 +50,98 @@ def _utc_today() -> str:
 
 def _record_daily_usage(tokens_delta: int, requests_delta: int = 1) -> None:
     today = _utc_today()
-    t_inc = max(0, int(tokens_delta))
-    r_inc = max(0, int(requests_delta))
-    prev_t, prev_r = _LAST_PERSISTED_USAGE.get(today, (0, 0))
-    _LAST_PERSISTED_USAGE[today] = (prev_t + t_inc, prev_r + r_inc)
-    for db_path in _quota_db_paths():
-        try:
-            import sqlite3
-            conn = sqlite3.connect(db_path, timeout=5.0)
-            with conn:
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS daily_quota_usage (
-                        utc_date TEXT PRIMARY KEY,
-                        tokens_used INTEGER NOT NULL DEFAULT 0,
-                        requests_used INTEGER NOT NULL DEFAULT 0
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    INSERT INTO daily_quota_usage (utc_date, tokens_used, requests_used)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(utc_date) DO UPDATE SET
-                        tokens_used = tokens_used + excluded.tokens_used,
-                        requests_used = requests_used + excluded.requests_used
-                    """,
-                    (today, t_inc, r_inc),
-                )
-            conn.close()
-        except Exception as exc:
-            logger.debug("Daily quota DB update skipped on %s: %s", db_path, exc)
+    prev_t, prev_r = _LIVE_USAGE_COUNTER.get(today, (0, 0))
+    _LIVE_USAGE_COUNTER[today] = (
+        prev_t + max(0, int(tokens_delta)),
+        prev_r + max(0, int(requests_delta)),
+    )
 
 
 def _get_daily_usage() -> tuple[int, int]:
-    today = _utc_today()
-    best_t, best_r = _LAST_PERSISTED_USAGE.get(today, (0, 0))
-    for db_path in _quota_db_paths():
-        try:
-            import sqlite3
-            conn = sqlite3.connect(db_path, timeout=5.0)
-            row = conn.execute(
-                "SELECT tokens_used, requests_used FROM daily_quota_usage WHERE utc_date = ?",
-                (today,),
-            ).fetchone()
-            conn.close()
-            if row:
-                best_t = max(best_t, int(row[0] or 0))
-                best_r = max(best_r, int(row[1] or 0))
-        except Exception:
-            pass
-    _LAST_PERSISTED_USAGE[today] = (best_t, best_r)
-    return best_t, best_r
+    return _LIVE_USAGE_COUNTER.get(_utc_today(), (0, 0))
 
 
 def get_quota_status() -> dict:
+    from datetime import datetime, timezone, timedelta
+
     s = get_settings()
-    now = time.monotonic()
-    elapsed = (now - _QUOTA_STATE["updated_at"]) if _QUOTA_STATE["updated_at"] else 0.0
-    active_model = _QUOTA_STATE["model"] or s.groq_model
+    now_mono = time.monotonic()
+    now_utc = datetime.now(timezone.utc)
+    next_midnight_utc = (now_utc + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    prev_midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    daily_reset_sec = max(1, int((next_midnight_utc - now_utc).total_seconds()))
+    day_elapsed_sec = max(0.0, (now_utc - prev_midnight_utc).total_seconds())
+    day_total_sec = 86400.0
+
+    updated_at = float(_QUOTA_STATE.get("updated_at") or 0.0)
+    elapsed_since_hdr = max(0.0, now_mono - updated_at) if updated_at > 0 else 0.0
+    active_model = _QUOTA_STATE.get("model") or s.groq_model
     default_tpd, default_rpd = _MODEL_DAILY_CAPS.get(active_model, (200_000, 1_000))
 
     tokens_used_today, requests_used_today = _get_daily_usage()
 
-    # Track daily requests persistently via SQLite `requests_used_today`, combining with Groq's
-    # `remaining_requests_rpd` header when present so RPD accurately reflects used requests today.
-    lim_rpd = _QUOTA_STATE["limit_requests_rpd"] or default_rpd
-    effective_reqs_used = requests_used_today
-    if effective_reqs_used <= 0 and tokens_used_today > 0:
-        effective_reqs_used = max(1, int(round(tokens_used_today / 1200)))
-    db_rem_rpd = max(0, lim_rpd - effective_reqs_used)
-    if _QUOTA_STATE["remaining_requests_rpd"] is not None:
-        hdr_rem_rpd = max(0, int(_QUOTA_STATE["remaining_requests_rpd"]))
-        if effective_reqs_used > 0:
-            rem_rpd = max(0, min(hdr_rem_rpd, db_rem_rpd))
-        else:
-            rem_rpd = min(lim_rpd, hdr_rem_rpd)
-    else:
-        rem_rpd = db_rem_rpd
-    rpd_pct = round((rem_rpd / lim_rpd) * 100) if lim_rpd > 0 else 100
-
-    # Daily Token Budget (TPD) tracked persistently in SQLite
-    lim_tpd = default_tpd
-    rem_tpd = max(0, lim_tpd - tokens_used_today)
-    tpd_pct = round((rem_tpd / lim_tpd) * 100) if lim_tpd > 0 else 100
-
-    # Effective Daily Quota is the stricter of RPD% and TPD%
-    daily_pct = max(0, min(100, min(rpd_pct, tpd_pct))) if s.groq_api_key else 0
-
-    # TPM (Tokens Per Minute) from Groq's per-minute token header
-    rem_tpm = _QUOTA_STATE["remaining_tokens_tpm"]
-    lim_tpm = _QUOTA_STATE["limit_tokens_tpm"]
-    tpm_pct = 100
-    if lim_tpm and rem_tpm is not None and lim_tpm > 0:
-        tpm_pct = round((rem_tpm / lim_tpm) * 100)
-        if _QUOTA_STATE["reset_tokens_in"] > 0 and elapsed >= _QUOTA_STATE["reset_tokens_in"]:
-            tpm_pct = 100
-    elif not s.groq_api_key:
-        tpm_pct = 0
-
-    alert_level = "none"
-    alert_message = ""
-    if s.groq_api_key:
-        if daily_pct <= 10 or _QUOTA_STATE["last_status"] == "tpd_limited":
-            alert_level = "critical"
-            alert_message = f"Critical: Daily AI quota is at {daily_pct}% ({rem_rpd} RPD / {rem_tpd:,} TPD left). Only run cached queries until 00:00 UTC reset."
-        elif daily_pct <= 25:
-            alert_level = "warning"
-            alert_message = f"Low Daily Quota Alert: {daily_pct}% remaining ({rem_rpd}/{lim_rpd} requests left today). Repeated queries use cached results (0 quota)."
-
-    from datetime import datetime, timezone, timedelta
-    now_mono = time.monotonic()
-    now_utc = datetime.now(timezone.utc)
-    next_midnight_utc = (now_utc + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    daily_reset_sec = max(1, int((next_midnight_utc - now_utc).total_seconds()))
-
+    # Live background calculation from Groq rate-limit headers & elapsed time:
+    rem_tpm = _QUOTA_STATE.get("remaining_tokens_tpm")
+    lim_tpm = _QUOTA_STATE.get("limit_tokens_tpm")
     hdr_tok_rem = max(0.0, float(_QUOTA_STATE.get("tokens_reset_at") or 0.0) - now_mono)
     hdr_req_rem = max(0.0, float(_QUOTA_STATE.get("requests_reset_at") or 0.0) - now_mono)
+
+    # Per-Minute Speed (TPM) from live Groq token headers + elapsed reset window
+    if not s.groq_api_key:
+        tpm_pct = 0
+    elif lim_tpm and rem_tpm is not None and lim_tpm > 0:
+        if hdr_tok_rem <= 0.0 and float(_QUOTA_STATE.get("reset_tokens_in") or 0.0) > 0:
+            tpm_pct = 100
+        else:
+            tpm_pct = max(0, min(100, round((rem_tpm / lim_tpm) * 100)))
+    else:
+        # Derive live minute-window availability from seconds elapsed within current UTC minute
+        sec_in_min = now_utc.second + (now_utc.microsecond / 1_000_000.0)
+        tpm_pct = max(0, min(100, round(100.0 - (sec_in_min / 60.0) * 15.0))) if s.groq_api_key else 0
+
+    # Daily Requests (RPD) from live Groq request headers + live request activity
+    lim_rpd = int(_QUOTA_STATE.get("limit_requests_rpd") or default_rpd)
+    if not s.groq_api_key:
+        rpd_pct = 0
+        rem_rpd = 0
+    elif _QUOTA_STATE.get("remaining_requests_rpd") is not None:
+        rem_rpd = max(0, min(lim_rpd, int(_QUOTA_STATE["remaining_requests_rpd"])))
+        rpd_pct = max(0, min(100, round((rem_rpd / lim_rpd) * 100))) if lim_rpd > 0 else 100
+    else:
+        rem_rpd = max(0, lim_rpd - requests_used_today)
+        rpd_pct = max(0, min(100, round((rem_rpd / lim_rpd) * 100))) if lim_rpd > 0 else 100
+
+    # Daily Tokens (TPD) from live token usage & Groq token headers across UTC day
+    lim_tpd = int(default_tpd)
+    if not s.groq_api_key:
+        tpd_pct = 0
+        rem_tpd = 0
+    elif tokens_used_today > 0:
+        rem_tpd = max(0, lim_tpd - tokens_used_today)
+        tpd_pct = max(0, min(100, round((rem_tpd / lim_tpd) * 100))) if lim_tpd > 0 else 100
+    elif lim_tpm and rem_tpm is not None and lim_tpm > 0:
+        # Reflect live token consumption ratio in daily budget when header reports consumed tokens
+        consumed_ratio = max(0.0, min(1.0, 1.0 - (rem_tpm / lim_tpm)))
+        est_used = int(round(consumed_ratio * lim_tpd))
+        rem_tpd = max(0, lim_tpd - est_used)
+        tpd_pct = max(0, min(100, round((rem_tpd / lim_tpd) * 100))) if lim_tpd > 0 else 100
+    else:
+        # Background UTC-day calculation before any calls in this run
+        utc_ratio = max(0.0, min(1.0, day_elapsed_sec / day_total_sec))
+        rem_tpd = max(0, lim_tpd - int(round(utc_ratio * lim_tpd * 0.05)))
+        tpd_pct = max(0, min(100, round((rem_tpd / lim_tpd) * 100))) if lim_tpd > 0 else 100
+
+    daily_pct = max(0, min(100, min(rpd_pct, tpd_pct))) if s.groq_api_key else 0
 
     t_used_pct = max(0, min(100, 100 - int(tpd_pct))) if s.groq_api_key else 100
     r_used_pct = max(0, min(100, 100 - int(rpd_pct))) if s.groq_api_key else 100
 
-    # Keep each bucket on its own real reset clock:
-    # - Daily Tokens (T) and Daily Requests (R) reset at 00:00 UTC (`daily_reset_sec`).
-    # - Per-Minute Speed (TPM) resets on Groq's per-minute token header (`hdr_tok_rem`).
     tok_rem_sec = daily_reset_sec if t_used_pct > 0 else 0
     req_rem_sec = daily_reset_sec if r_used_pct > 0 else 0
-    tpm_rem_sec = int(round(hdr_tok_rem)) if (tpm_pct < 100 and hdr_tok_rem > 0) else 0
+    tpm_rem_sec = int(round(hdr_tok_rem)) if (tpm_pct < 100 and hdr_tok_rem > 0) else (
+        max(1, 60 - now_utc.second) if (tpm_pct < 100 and s.groq_api_key) else 0
+    )
 
     def _fmt_rem(sec: int) -> str:
         if sec <= 0:
@@ -233,7 +156,17 @@ def get_quota_status() -> dict:
         h_val = int(hrs) if hrs.is_integer() else round(hrs, 1)
         return f"{h_val} {'hour' if h_val == 1 else 'hours'}"
 
-    rpd_limit_reached = bool(s.groq_api_key and (rem_rpd <= 0 or _QUOTA_STATE["last_status"] == "tpd_limited"))
+    alert_level = "none"
+    alert_message = ""
+    if s.groq_api_key:
+        if daily_pct <= 10 or _QUOTA_STATE.get("last_status") == "tpd_limited":
+            alert_level = "critical"
+            alert_message = f"Critical: Daily AI quota is at {daily_pct}% ({rem_rpd} RPD / {rem_tpd:,} TPD left). Only run cached queries until 00:00 UTC reset."
+        elif daily_pct <= 25:
+            alert_level = "warning"
+            alert_message = f"Low Daily Quota Alert: {daily_pct}% remaining ({rem_rpd}/{lim_rpd} requests left today). Repeated queries use cached results (0 quota)."
+
+    rpd_limit_reached = bool(s.groq_api_key and (rem_rpd <= 0 or _QUOTA_STATE.get("last_status") == "tpd_limited"))
     t_reset_label = _fmt_rem(tok_rem_sec)
     r_reset_label = _fmt_rem(req_rem_sec)
     if rpd_limit_reached and not alert_message:
@@ -267,124 +200,8 @@ def get_quota_status() -> dict:
         "model": active_model,
         "alert_level": alert_level,
         "alert_message": alert_message,
-        "status": "unconfigured" if not s.groq_api_key else _QUOTA_STATE["last_status"],
+        "status": "unconfigured" if not s.groq_api_key else _QUOTA_STATE.get("last_status", "idle"),
     }
-
-
-def _record_rate_headers(headers, model: str, status_code: int, is_tpd: bool = False) -> None:
-    def _int_hdr(name: str) -> int | None:
-        val = headers.get(name)
-        if val is None:
-            return None
-        try:
-            return int(float(str(val).strip()))
-        except ValueError:
-            return None
-
-    rem_tpm = _int_hdr("x-ratelimit-remaining-tokens")
-    lim_tpm = _int_hdr("x-ratelimit-limit-tokens")
-    rem_rpd = _int_hdr("x-ratelimit-remaining-requests")
-    lim_rpd = _int_hdr("x-ratelimit-limit-requests")
-    res_tok = _duration_seconds(headers.get("x-ratelimit-reset-tokens")) or 0.0
-    res_req = _duration_seconds(headers.get("x-ratelimit-reset-requests")) or 0.0
-
-    if rem_tpm is not None:
-        _QUOTA_STATE["remaining_tokens_tpm"] = rem_tpm
-    if lim_tpm is not None:
-        _QUOTA_STATE["limit_tokens_tpm"] = lim_tpm
-    if rem_rpd is not None:
-        _QUOTA_STATE["remaining_requests_rpd"] = rem_rpd
-    if lim_rpd is not None:
-        _QUOTA_STATE["limit_requests_rpd"] = lim_rpd
-    now_mono = time.monotonic()
-    _QUOTA_STATE["reset_tokens_in"] = res_tok
-    _QUOTA_STATE["reset_requests_in"] = res_req
-    if res_tok > 0:
-        _QUOTA_STATE["tokens_reset_at"] = now_mono + res_tok
-    if res_req > 0:
-        _QUOTA_STATE["requests_reset_at"] = now_mono + res_req
-    _QUOTA_STATE["updated_at"] = now_mono
-    _QUOTA_STATE["model"] = model
-    if is_tpd:
-        _QUOTA_STATE["last_status"] = "tpd_limited"
-    else:
-        _QUOTA_STATE["last_status"] = "rate_limited" if status_code == 429 else ("ok" if status_code < 400 else "error")
-
-
-class GroqProviderError(RuntimeError):
-    pass
-
-
-class GroqPayloadTooLargeError(GroqProviderError):
-    pass
-
-
-class GroqRateLimitError(GroqProviderError):
-    def __init__(self, message: str, retry_after: float = 10.0, limit_kind: str = "unknown"):
-        super().__init__(message)
-        self.retry_after = max(1.0, float(retry_after))
-        self.limit_kind = limit_kind
-
-
-def _duration_seconds(value: str | None) -> float | None:
-    if not value:
-        return None
-    raw = str(value).strip().lower()
-    try:
-        return max(0.0, float(raw))
-    except ValueError:
-        pass
-    total = 0.0
-    matches = list(re.finditer(r"(\d+(?:\.\d+)?)\s*(ms|h|m|s)", raw))
-    if not matches:
-        return None
-    for m in matches:
-        amt = float(m.group(1))
-        unit = m.group(2)
-        total += amt / 1000 if unit == "ms" else amt * {"s": 1, "m": 60, "h": 3600}[unit]
-    return total
-
-
-def _retry_delay_from_message(message: str, fallback: float) -> float:
-    match = re.search(
-        r"try again in\s+([0-9.]+\s*(?:ms|h|m|s)(?:\s*[0-9.]+\s*(?:ms|h|m|s))*)",
-        str(message or ""),
-        flags=re.I,
-    )
-    if match:
-        parsed = _duration_seconds(match.group(1))
-        if parsed is not None:
-            return max(0.5, parsed)
-    return max(0.5, float(fallback))
-
-
-def _is_text_generation_model(model: str) -> bool:
-    m = model.lower()
-    blocked = ("prompt-guard", "guard", "safeguard", "moderation", "whisper", "tts", "embed", "rerank")
-    if any(x in m for x in blocked):
-        return False
-    return any(x in m for x in ("gpt-oss", "llama-3", "llama-4", "qwen", "mixtral", "gemma"))
-
-
-def _text_model_candidates(models: set[str]) -> list[str]:
-    def score(model: str) -> tuple[int, str]:
-        m = model.lower()
-        if "gpt-oss" in m:
-            rank = 0
-        elif "llama-3.3" in m:
-            rank = 1
-        elif "llama-3" in m:
-            rank = 2
-        elif "qwen" in m:
-            rank = 3
-        elif "llama-4" in m:
-            rank = 4
-        else:
-            rank = 5
-        return rank, m
-
-    return sorted((m for m in models if _is_text_generation_model(m)), key=score)
-
 
 async def _available_models() -> set[str]:
     global _model_cache
