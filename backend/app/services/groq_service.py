@@ -32,6 +32,8 @@ _QUOTA_STATE: dict = {
     "limit_requests_rpd": None,
     "reset_tokens_in": 0.0,
     "reset_requests_in": 0.0,
+    "tokens_reset_at": 0.0,
+    "requests_reset_at": 0.0,
     "updated_at": 0.0,
     "model": None,
     "last_status": "idle",
@@ -148,15 +150,23 @@ def get_quota_status() -> dict:
             alert_level = "warning"
             alert_message = f"Low Daily Quota Alert: {daily_pct}% remaining ({rem_rpd}/{lim_rpd} requests left today). Repeated queries use cached results (0 quota)."
 
-    elapsed_since_hdr = max(0.0, time.monotonic() - float(_QUOTA_STATE.get("updated_at") or 0.0)) if _QUOTA_STATE.get("updated_at") else 0.0
-    rem_tok_sec = max(0.0, float(_QUOTA_STATE.get("reset_tokens_in") or 0.0) - elapsed_since_hdr)
-    rem_req_sec = max(0.0, float(_QUOTA_STATE.get("reset_requests_in") or 0.0) - elapsed_since_hdr)
+    from datetime import datetime, timezone, timedelta
+    now_mono = time.monotonic()
+    now_utc = datetime.now(timezone.utc)
+    next_midnight_utc = (now_utc + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    daily_reset_sec = max(1, int((next_midnight_utc - now_utc).total_seconds()))
+
+    hdr_tok_rem = max(0.0, float(_QUOTA_STATE.get("tokens_reset_at") or 0.0) - now_mono)
+    hdr_req_rem = max(0.0, float(_QUOTA_STATE.get("requests_reset_at") or 0.0) - now_mono)
 
     t_used_pct = max(0, min(100, 100 - int(tpd_pct))) if s.groq_api_key else 100
     r_used_pct = max(0, min(100, 100 - int(rpd_pct))) if s.groq_api_key else 100
 
-    tok_rem_sec = int(round(rem_tok_sec))
-    req_rem_sec = int(round(rem_req_sec))
+    # Active remaining reset timer:
+    # - Uses live rate-limit header countdown (seconds/minutes) when active (> 0)
+    # - Falls back to remaining daily reset countdown (hours/minutes until 00:00 UTC) whenever quota > 0% is used
+    tok_rem_sec = int(round(hdr_tok_rem)) if hdr_tok_rem > 0 else (daily_reset_sec if t_used_pct > 0 else 0)
+    req_rem_sec = int(round(hdr_req_rem)) if hdr_req_rem > 0 else (daily_reset_sec if r_used_pct > 0 else 0)
 
     def _fmt_rem(sec: int) -> str:
         if sec <= 0:
@@ -232,9 +242,14 @@ def _record_rate_headers(headers, model: str, status_code: int, is_tpd: bool = F
         _QUOTA_STATE["remaining_requests_rpd"] = rem_rpd
     if lim_rpd is not None:
         _QUOTA_STATE["limit_requests_rpd"] = lim_rpd
+    now_mono = time.monotonic()
     _QUOTA_STATE["reset_tokens_in"] = res_tok
     _QUOTA_STATE["reset_requests_in"] = res_req
-    _QUOTA_STATE["updated_at"] = time.monotonic()
+    if res_tok > 0:
+        _QUOTA_STATE["tokens_reset_at"] = now_mono + res_tok
+    if res_req > 0:
+        _QUOTA_STATE["requests_reset_at"] = now_mono + res_req
+    _QUOTA_STATE["updated_at"] = now_mono
     _QUOTA_STATE["model"] = model
     if is_tpd:
         _QUOTA_STATE["last_status"] = "tpd_limited"

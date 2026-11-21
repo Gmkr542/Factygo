@@ -487,15 +487,15 @@ export default function Home() {
           const rRem = formatRemaining(liveRequestSec);
 
           const resetParts = [];
-          if (tUsed > 0) {
-            resetParts.push(tRem ? `${tUsed}% in ${tRem}` : `${tUsed}% (timer elapsed)`);
+          if (tUsed > 0 && tRem) {
+            resetParts.push(`${tUsed}% in ${tRem}`);
           }
-          if (rUsed > 0) {
-            resetParts.push(rRem ? `${rUsed}% in ${rRem}` : `${rUsed}% (timer elapsed)`);
+          if (rUsed > 0 && rRem) {
+            resetParts.push(`${rUsed}% in ${rRem}`);
           }
 
-          const tHoverStatus = tUsed === 0 ? "100% available" : (tRem ? `resets in ${tRem}` : "no active reset timer");
-          const rHoverStatus = rUsed === 0 ? "100% available" : (rRem ? `resets in ${rRem}` : "no active reset timer");
+          const tHoverStatus = tUsed === 0 ? "100% available" : (tRem ? `resets in ${tRem}` : "100% available");
+          const rHoverStatus = rUsed === 0 ? "100% available" : (rRem ? `resets in ${rRem}` : "100% available");
 
           return (
             <div
