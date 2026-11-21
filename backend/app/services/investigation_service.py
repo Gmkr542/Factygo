@@ -45,22 +45,24 @@ def _raw_answer(question: str, documents: list[dict]) -> str:
 
 def _format_quick_report(verdict: str, claim: str, raw_text: str) -> str:
     cleaned = " ".join(str(raw_text or "").split()).strip()
-    title_verdict = verdict.title()
-    # Strip existing Result prefix to normalize cleanly
-    cleaned = re.sub(r"^Result\s*:\s*[A-Za-z ]+,\s*", "", cleaned, flags=re.I)
-    # Strip robotic meta-filler if the LLM still includes it
+    # Strip "Result : <Verdict>," or "Result:" prefix so the headline starts directly with the answer
+    cleaned = re.sub(
+        r"^Result\s*:\s*(?:TRUE|MOSTLY TRUE|PARTLY TRUE|MISLEADING|MOSTLY FALSE|FALSE|UNVERIFIED)?\s*[,:\-–]?\s*",
+        "",
+        cleaned,
+        flags=re.I,
+    )
+    # Strip robotic meta-filler if the LLM includes it
     cleaned = re.sub(
         r"^(?:the claim that\s+.+?\s+is\s+(?:contradicted|supported|refuted)\s+by\s+.+?(?:indicating|showing|stating)\s+that\s+)",
         "",
         cleaned,
         flags=re.I,
     )
-    cleaned = re.sub(r",?\s*making the claim (?:false|true|misleading)\.?$", ".", cleaned, flags=re.I)
     if cleaned:
-        cleaned = cleaned[0].upper() + cleaned[1:]
-    else:
-        cleaned = f"Evaluated against top retrieved primary sources for \"{claim[:100]}\"."
-    return f"Result : {title_verdict}, {cleaned}"
+        return cleaned.upper() + cleaned[1:]
+    return f"Evaluated against top retrieved primary sources for \"{claim[:100]}\"."
+
 
 
 def _compute_analysis(evidence: list[dict], base_analysis: dict | None = None) -> dict:
