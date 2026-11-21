@@ -1,3 +1,4 @@
+python
 from __future__ import annotations
 
 import asyncio
@@ -38,6 +39,8 @@ _STOPWORDS = {
     "in", "is", "it", "of", "on", "or", "that", "the", "their", "this", "to", "was",
     "were", "will", "with", "without", "against", "about", "into", "than", "then", "they",
     "them", "there", "these", "those", "what", "when", "where", "which", "who", "why", "how",
+    "does", "do", "did", "can", "could", "would", "should", "may", "might", "evidence",
+    "claim", "clinical", "scientific", "research", "study", "studies", "support", "prove",
 }
 
 
@@ -102,7 +105,10 @@ def _normalise(results: list[dict]) -> list[dict]:
 
 
 def _ddgs_search(query: str, max_results: int, backend: str | None = None) -> list[dict]:
-    from ddgs import DDGS
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        from duckduckgo_search import DDGS
     kwargs = {"max_results": max_results}
     if backend:
         kwargs["backend"] = backend
@@ -137,7 +143,7 @@ async def _ddgs(query: str, max_results: int) -> list[dict]:
 
 
 async def _google_news(query: str, max_results: int) -> list[dict]:
-    url = f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"
+    url = f"https://google.com{quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"
     try:
         async with httpx.AsyncClient(
             timeout=get_settings().search_timeout,
@@ -169,34 +175,102 @@ async def _google_news(query: str, max_results: int) -> list[dict]:
     return _normalise(results)
 
 
+async def _pubmed_fallback(query: str, max_results: int = 5) -> list[dict]:
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            esearch = await client.get(
+                "https://nih.gov",
+                params={"db": "pubmed", "term": query, "retmode": "json", "retmax": max_results},
+            )
+            esearch.raise_for_status()
+            ids = esearch.json().get("esearchresult", {}).get("idlist", [])
+            if not ids:
+                return []
+            esum = await client.get(
+                "https://nih.gov",
+                params={"db": "pubmed", "id": ",".join(ids), "retmode": "json"},
+            )
+            esum.raise_for_status()
+            data = esum.json().get("result", {})
+            out = []
+            for pmid in ids:
+                item = data.get(pmid)
+                if not isinstance(item, dict):
+                    continue
+                title = str(item.get("title") or "").strip()
+                journal = str(item.get("fulljournalname") or item.get("source") or "PubMed").strip()
+                pubdate = str(item.get("pubdate") or "").strip()
+                if title:
+                    out.append({
+                        "title": title,
+                        "url": f"https://nih.gov{pmid}/",
+                        "publisher": journal,
+                        "body": f"{title} Published in {journal} ({pubdate}).",
+                    })
+            return _normalise(out)
+    except Exception as e:
+        logger.debug("PubMed fallback failed: %s", type(e).__name__)
+        return []
+
+
+async def _wikipedia_fallback(query: str, max_results: int = 3) -> list[dict]:
+    try:
+        async with httpx.AsyncClient(
+            timeout=6.0,
+            headers={"User-Agent": "Factygo/1.1 (https://onrender.com)"},
+        ) as client:
+            resp = await client.get(
+                "https://wikipedia.org",
+                params={
+                    "action": "query",
+                    "list": "search",
+                    "srsearch": query,
+                    "format": "json",
+                    "srlimit": max_results,
+                },
+            )
+            resp.raise_for_status()
+            hits = resp.json().get("query", {}).get("search", [])
+            out = []
+            for h in hits:
+                title = str(h.get("title") or "").strip()
+                snippet = re.sub(r"<[^>]+>", " ", str(h.get("snippet") or "")).strip()
+                if title:
+                    slug = quote_plus(title.replace(" ", "_"))
+                    out.append({
+                        "title": f"{title} - Wikipedia",
+                        "url": f"https://wikipedia.org{slug}",
+                        "publisher": "Wikipedia",
+                        "body": snippet or title,
+                    })
+            return _normalise(out)
+    except Exception as e:
+Use code with caution.
+logger.debug("Wikipedia fallback failed: %s", type(e).name)
+return []
 def _terms(value: str) -> set[str]:
-    return {t for t in re.findall(r"[a-z0-9]{3,}", value.lower()) if t not in _STOPWORDS}
-
-
+return {t for t in re.findall(r"[a-z0-9]{3,}", value.lower()) if t not in _STOPWORDS}
 def _score_relevance(query: str, item: dict) -> int:
-    q = " ".join(query.split()).lower()
-    qt = _terms(q)
-    hay = f"{item.get('title', '')} {item.get('publisher', '')} {item.get('content', '')}".lower()
-    ht = _terms(hay)
-    if not qt:
-        item["relevance_score"] = 50
-        item["relevant"] = True
-        return 50
-    overlap = qt & ht
-    coverage = len(overlap) / len(qt)
-    title_overlap = len(qt & _terms(str(item.get("title", ""))))
-    exact = 1 if q in hay and len(q) > 10 else 0
-    score = min(100, round(coverage * 65 + min(title_overlap, 3) * 8 + exact * 25))
-    item["relevance_score"] = score
-    item["relevance_reason"] = (
-        "Exact phrase match" if exact else f"{len(overlap)}/{len(qt)} key terms match ({title_overlap} in title)"
-    )
-    item["relevant"] = bool(exact or (len(overlap) >= (1 if len(qt) <= 2 else 2) and score >= 45))
-    return score
-
-
+q = " ".join(query.split()).lower()
+qt = _terms(q)
+hay = f"{item.get('title', '')} {item.get('publisher', '')} {item.get('content', '')}".lower()
+ht = _terms(hay)
+if not qt:
+item["relevance_score"] = 50
+item["relevant"] = True
+return 50
+overlap = qt & ht
+coverage = len(overlap) / len(qt)
+title_overlap = len(qt & _terms(str(item.get("title", ""))))
+exact = 1 if q in hay and len(q) > 10 else 0
+score = min(100, round(coverage * 65 + min(title_overlap, 3) * 8 + exact * 25))
+item["relevance_score"] = score
+item["relevance_reason"] = (
+"Exact phrase match" if exact else f"{len(overlap)}/{len(qt)} key terms match ({title_overlap} in title)"
+)
+item["relevant"] = bool(exact or (len(overlap) >= (1 if len(qt) <= 2 else 2) and score >= 45))
+return score
 def _clean_search_query(query: str) -> str:
-    # Strip verbose FactyGo framing prefixes so search engines receive crisp keywords
     cleaned = re.sub(
         r"^(?:what authoritative sources establish the factual status of:|"
         r"what primary or original source evidence is available for:|"
@@ -205,13 +279,16 @@ def _clean_search_query(query: str) -> str:
         query.strip(),
         flags=re.I,
     )
-    return " ".join(cleaned.split())[:220]
+    cleaned = re.sub(r"[?\"']", " ", cleaned)
+    tokens = [w for w in cleaned.split() if w.lower() not in _STOPWORDS]
+    keyword_q = " ".join(tokens) if len(tokens) >= 2 else cleaned
+    return " ".join(keyword_q.split())[:140]
 
 
 def _plan_queries(base_query: str, plan: dict | None) -> list[str]:
     if not plan:
         return []
-    terms = [f"{base_query} {str(x).strip()}"[:240] for x in plan.get("search_strategy", [])[:3] if str(x).strip()]
+    terms = [f"{base_query} {str(x).strip()}"[:200] for x in plan.get("search_strategy", [])[:3] if str(x).strip()]
     domains = []
     for d in plan.get("preferred_domains", [])[:4]:
         d = str(d).strip().lower().removeprefix("https://").removeprefix("http://").split("/")[0]
@@ -237,6 +314,14 @@ async def search_web(query: str, max_results: int | None = None, resource_plan: 
     for batch in list(ddgs_batches) + list(news_batches):
         if isinstance(batch, list):
             combined.extend(batch)
+
+    if len(combined) < 3:
+        pubmed_res, wiki_res = await asyncio.gather(
+            _pubmed_fallback(base_q, min(max_results, 5)),
+            _wikipedia_fallback(base_q, 3),
+        )
+        combined.extend(pubmed_res)
+        combined.extend(wiki_res)
 
     results = _normalise(combined)
     for item in results:
@@ -265,8 +350,6 @@ async def search_web(query: str, max_results: int | None = None, resource_plan: 
 
 
 class ResearchService:
-    """Compatibility wrapper matching FactyGo's original ResearchService interface."""
-
     def search(self, query: str) -> list[dict]:
         return asyncio.run(search_web(query))
 
