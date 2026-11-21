@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: str = "development"
     app_name: str = "Factygo API"
-    app_version: str = "3.0.3"
+    app_version: str = "3.0.4"
     groq_api_key: str | None = None
     groq_model: str = "openai/gpt-oss-120b"
     groq_fallback_model: str | None = None

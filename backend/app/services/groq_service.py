@@ -205,6 +205,21 @@ def _record_rate_headers(headers, model: str, status_code: int, is_tpd: bool = F
         _QUOTA_STATE["last_status"] = "rate_limited" if status_code == 429 else ("ok" if status_code < 400 else "error")
 
 
+class GroqProviderError(RuntimeError):
+    pass
+
+
+class GroqPayloadTooLargeError(GroqProviderError):
+    pass
+
+
+class GroqRateLimitError(GroqProviderError):
+    def __init__(self, message: str, retry_after: float = 10.0, limit_kind: str = "unknown"):
+        super().__init__(message)
+        self.retry_after = max(1.0, float(retry_after))
+        self.limit_kind = limit_kind
+
+
 def _duration_seconds(value: str | None) -> float | None:
     if not value:
         return None
