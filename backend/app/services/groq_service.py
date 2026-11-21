@@ -148,24 +148,44 @@ def get_quota_status() -> dict:
             alert_level = "warning"
             alert_message = f"Low Daily Quota Alert: {daily_pct}% remaining ({rem_rpd}/{lim_rpd} requests left today). Repeated queries use cached results (0 quota)."
 
-    from datetime import datetime, timezone, timedelta
-    now_utc = datetime.now(timezone.utc)
-    next_midnight_utc = (now_utc + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    mins_until_reset = max(1, int((next_midnight_utc - now_utc).total_seconds() // 60))
-    rpd_used_pct = max(0, min(100, 100 - int(rpd_pct))) if s.groq_api_key else 100
+    elapsed_since_hdr = max(0.0, time.monotonic() - float(_QUOTA_STATE.get("updated_at") or 0.0)) if _QUOTA_STATE.get("updated_at") else 0.0
+    raw_tok_sec = max(0.0, float(_QUOTA_STATE.get("reset_tokens_in") or 0.0) - elapsed_since_hdr)
+    raw_req_sec = max(0.0, float(_QUOTA_STATE.get("reset_requests_in") or 0.0) - elapsed_since_hdr)
+
+    t_used_pct = max(0, min(100, 100 - int(tpd_pct))) if s.groq_api_key else 100
+    r_used_pct = max(0, min(100, 100 - int(rpd_pct))) if s.groq_api_key else 100
+
+    tok_win_sec = int(round(raw_tok_sec)) if raw_tok_sec > 0 else (60 if (t_used_pct > 0 or (rem_tpm is not None and lim_tpm and rem_tpm < lim_tpm)) else 0)
+    req_win_sec = int(round(raw_req_sec)) if raw_req_sec > 0 else (60 if r_used_pct > 0 else 0)
+
+    def _fmt_win(sec: int) -> str:
+        if sec <= 0:
+            return "60 seconds"
+        if sec < 60:
+            return f"{sec} {'second' if sec == 1 else 'seconds'}"
+        mins = sec / 60.0
+        if mins < 60:
+            m_val = int(mins) if mins.is_integer() else round(mins, 1)
+            return f"{m_val} {'minute' if m_val == 1 else 'minutes'}"
+        hrs = mins / 60.0
+        h_val = int(hrs) if hrs.is_integer() else round(hrs, 1)
+        return f"{h_val} {'hour' if h_val == 1 else 'hours'}"
+
     rpd_limit_reached = bool(s.groq_api_key and (rem_rpd <= 0 or _QUOTA_STATE["last_status"] == "tpd_limited"))
-    reset_time_str = next_midnight_utc.strftime("%H:%M UTC")
+    t_reset_label = _fmt_win(tok_win_sec)
+    r_reset_label = _fmt_win(req_win_sec)
     if rpd_limit_reached and not alert_message:
         alert_level = "critical"
-        alert_message = f"Daily RPD limit reached · Resets at {reset_time_str} ({mins_until_reset} min)."
+        alert_message = f"Rate limit reached · Resets in {r_reset_label}."
 
     return {
         "ai_configured": bool(s.groq_api_key),
         "available_pct": daily_pct,
         "daily_available_pct": daily_pct,
         "rpd_available_pct": max(0, min(100, int(rpd_pct))),
-        "rpd_used_pct": rpd_used_pct,
+        "rpd_used_pct": r_used_pct,
         "tpd_available_pct": max(0, min(100, int(tpd_pct))),
+        "tpd_used_pct": t_used_pct,
         "tpm_available_pct": max(0, min(100, int(tpm_pct))),
         "remaining_requests_rpd": rem_rpd,
         "limit_requests_rpd": lim_rpd,
@@ -175,15 +195,10 @@ def get_quota_status() -> dict:
         "remaining_tokens_tpm": rem_tpm,
         "limit_tokens_tpm": lim_tpm,
         "utc_date": _utc_today(),
-        "reset_time_utc": reset_time_str,
-        "reset_in_minutes": mins_until_reset,
-        "reset_duration_label": (
-            f"{mins_until_reset} {'min' if mins_until_reset == 1 else 'mins'}"
-            if mins_until_reset < 60
-            else (
-                lambda hrs: f"{hrs:g} {'hour' if hrs == 1 else 'hours'}"
-            )(round(mins_until_reset / 60, 1))
-        ),
+        "token_reset_seconds": tok_win_sec,
+        "request_reset_seconds": req_win_sec,
+        "token_reset_label": t_reset_label,
+        "request_reset_label": r_reset_label,
         "rpd_limit_reached": rpd_limit_reached,
         "model": active_model,
         "alert_level": alert_level,

@@ -373,7 +373,7 @@ export default function Home() {
     });
   }, [evidence, sources]);
 
-  const visibleItems = showAllSources ? unifiedItems : unifiedItems.slice(0, 3);
+  const visibleItems = showAllSources ? unifiedItems : unifiedItems.slice(0, 1);
 
   const supporting = useMemo(
     () => unifiedItems.filter(e => e.stance === "supporting"),
@@ -441,14 +441,29 @@ export default function Home() {
         {quota && (() => {
           const tPct = quota.tpd_available_pct ?? quota.daily_available_pct ?? 100;
           const rPct = quota.rpd_available_pct ?? quota.daily_available_pct ?? 100;
-          const tUsed = Math.max(0, Math.min(100, 100 - tPct));
+          const tUsed = quota.tpd_used_pct ?? Math.max(0, Math.min(100, 100 - tPct));
           const rUsed = quota.rpd_used_pct ?? Math.max(0, Math.min(100, 100 - rPct));
-          const mins = quota.reset_in_minutes ?? 1440;
-          const durMH = mins < 60 ? `${mins} M` : `${Number((mins / 60).toFixed(1))} H`;
-          const hasDecrease = tUsed > 0 || rUsed > 0 || tPct < 100 || rPct < 100;
+
+          const formatMinuteWindow = (secValue, fallbackLabel) => {
+            if (fallbackLabel) return fallbackLabel;
+            const s = Math.max(1, Number(secValue || 60));
+            if (s < 60) return `${s} ${s === 1 ? "second" : "seconds"}`;
+            const m = s / 60;
+            if (m < 60) {
+              const mNum = Number.isInteger(m) ? m : Number(m.toFixed(1));
+              return `${mNum} ${mNum === 1 ? "minute" : "minutes"}`;
+            }
+            const h = m / 60;
+            const hNum = Number.isInteger(h) ? h : Number(h.toFixed(1));
+            return `${hNum} ${hNum === 1 ? "hour" : "hours"}`;
+          };
+
+          const tWin = formatMinuteWindow(quota.token_reset_seconds, quota.token_reset_label);
+          const rWin = formatMinuteWindow(quota.request_reset_seconds, quota.request_reset_label);
+
           const resetParts = [];
-          if (tUsed > 0) resetParts.push(`${tUsed}% in ${durMH}`);
-          if (rUsed > 0) resetParts.push(`${rUsed}% in ${durMH}`);
+          if (tUsed > 0) resetParts.push(`${tUsed}% in ${tWin}`);
+          if (rUsed > 0) resetParts.push(`${rUsed}% in ${rWin}`);
 
           return (
             <div
@@ -458,10 +473,9 @@ export default function Home() {
               }
               title={
                 `Model: ${quota.model} (${quota.utc_date} UTC)\n` +
-                `• Daily Tokens (TPD): ${quota.remaining_tokens_tpd?.toLocaleString()} / ${quota.limit_tokens_tpd?.toLocaleString()} (${tPct}% left, ${tUsed}% used)\n` +
-                `• Daily Requests (RPD): ${quota.remaining_requests_rpd?.toLocaleString()} / ${quota.limit_requests_rpd?.toLocaleString()} (${rPct}% left, ${rUsed}% used)\n` +
-                `• Per-Minute Speed (TPM): ${quota.tpm_available_pct}% available\n` +
-                `• Daily Reset: ${quota.reset_time_utc || "00:00 UTC"} (in ${durMH} / ${mins} min)`
+                `• Tokens (T): ${quota.remaining_tokens_tpd?.toLocaleString()} / ${quota.limit_tokens_tpd?.toLocaleString()} (${tPct}% left, ${tUsed}% used · window: ${tWin})\n` +
+                `• Requests (R): ${quota.remaining_requests_rpd?.toLocaleString()} / ${quota.limit_requests_rpd?.toLocaleString()} (${rPct}% left, ${rUsed}% used · window: ${rWin})\n` +
+                `• Per-Minute Speed (TPM): ${quota.tpm_available_pct}% available`
               }
             >
               <div className="quotaMainLine">
@@ -470,7 +484,7 @@ export default function Home() {
                   Daily Quota: <strong>{tPct}% T</strong>, <strong>{rPct}% R</strong>
                 </span>
               </div>
-              {hasDecrease && resetParts.length > 0 && (
+              {resetParts.length > 0 && (
                 <div className="quotaMergedReset">
                   resets {resetParts.join(", ")}
                 </div>
@@ -495,7 +509,7 @@ export default function Home() {
 
       {quota?.rpd_limit_reached && (
         <div className="rpdSearchNotice" role="status">
-          <span>Limit reached · Resets at <strong>{quota.reset_time_utc}</strong> ({quota.reset_in_minutes} min)</span>
+          <span>Limit reached · Resets in <strong>{quota.request_reset_label || "60 seconds"}</strong></span>
         </div>
       )}
       <section className="searchCard" ref={searchBoxRef}>
@@ -823,8 +837,8 @@ export default function Home() {
                     onClick={() => setShowAllSources(prev => !prev)}
                   >
                     {showAllSources
-                      ? "Show fewer sources ▲"
-                      : `Show all ${unifiedItems.length} sources (+${unifiedItems.length - 3} more) ▼`}
+                      ? "Show top source ▲"
+                      : `Show all (${unifiedItems.length}) ▼`}
                   </button>
                 )}
               </>
@@ -833,45 +847,45 @@ export default function Home() {
             {/* 5. Collapsible Research Queries, Symbolic Logic & Methodology Drawer */}
             <details className="researchDrawer">
               <summary>
-                <span>Research queries, symbolic logic & methodology ({(result.research_questions || []).length} queries)</span>
+                <span>Research queries, symbolic logic &amp; methodology ({(result.research_questions || []).length} queries)</span>
                 <span className="drawerChevron">▾</span>
               </summary>
-              <div className="drawerContent">
-                <div className="drawerClaimBox">
-                  <strong>Investigated Input:</strong> {result.claim || text}
+              <div className="drawerContent summaryReportBox">
+                <div className="summaryReportHeader">
+                  <span>Summarised Verification Report</span>
+                  <span className="summaryReportMeta">
+                    {result.verdict || "UNVERIFIED"} · {result.confidence ?? 0}% · {unifiedItems.length} sources
+                  </span>
                 </div>
 
+                <p className="summaryReportLead">
+                  <strong>Claim:</strong> {result.claim || text} — {result.summary || result.verdict_reason || "Verified against retrieved evidence."}
+                </p>
+
                 {computedFacts.length > 0 && (
-                  <div className="drawerLogicBox">
-                    <strong>Deterministic Symbolic, Unit & Temporal Checks</strong>
-                    <ul>
-                      {computedFacts.map((fact, idx) => (
-                        <li key={idx}>{fact}</li>
+                  <div className="summaryReportSection">
+                    <strong>Logic &amp; Checks:</strong>{" "}
+                    <span>{computedFacts.slice(0, 3).join(" · ")}</span>
+                  </div>
+                )}
+
+                {(result.research_questions || []).length > 0 && (
+                  <div className="summaryReportSection">
+                    <strong>Queries ({(result.research_questions || []).length}):</strong>
+                    <ul className="compactSummaryList">
+                      {(result.research_questions || []).map((q, idx) => (
+                        <li key={q.id || idx}>
+                          <strong>Q{idx + 1}:</strong> {q.question} — <span>{q.raw_answer || "Checked against evidence."}</span>
+                        </li>
                       ))}
                     </ul>
                   </div>
                 )}
 
-                {(result.research_questions || []).map((q) => (
-                  <div className="drawerQuestionItem" key={q.id}>
-                    <div className="drawerQHeader">
-                      <span className="qBadge">Q{q.id}</span>
-                      <strong>{q.question}</strong>
-                    </div>
-                    <p>{q.raw_answer}</p>
-                  </div>
-                ))}
-
-                {result.methodology?.length > 0 && (
-                  <div className="drawerMethodology">
-                    <strong>Verification Pipeline</strong>
-                    <ul>
-                      {result.methodology.map((m, i) => (
-                        <li key={i}>{m}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                <div className="summaryReportSection">
+                  <strong>Pipeline:</strong>{" "}
+                  <span>Multi-source retrieval, evidence tiering, citation audit &amp; deterministic logic checks.</span>
+                </div>
               </div>
             </details>
           </div>
