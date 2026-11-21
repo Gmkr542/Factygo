@@ -177,7 +177,13 @@ def get_quota_status() -> dict:
         "utc_date": _utc_today(),
         "reset_time_utc": reset_time_str,
         "reset_in_minutes": mins_until_reset,
-        "reset_duration_label": f"{mins_until_reset} min" if mins_until_reset < 60 else f"{round(mins_until_reset / 60, 1)} hr",
+        "reset_duration_label": (
+            f"{mins_until_reset} {'min' if mins_until_reset == 1 else 'mins'}"
+            if mins_until_reset < 60
+            else (
+                lambda hrs: f"{hrs:g} {'hour' if hrs == 1 else 'hours'}"
+            )(round(mins_until_reset / 60, 1))
+        ),
         "rpd_limit_reached": rpd_limit_reached,
         "model": active_model,
         "alert_level": alert_level,

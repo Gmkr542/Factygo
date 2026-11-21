@@ -460,13 +460,18 @@ export default function Home() {
                 )}
               </span>
             </div>
-            <div className="quotaMergedReset">
-              resets {quota.rpd_used_pct}% /{" "}
-              {quota.reset_duration_label ||
-                (quota.reset_in_minutes < 60
-                  ? `${quota.reset_in_minutes} min`
-                  : `${(quota.reset_in_minutes / 60).toFixed(1)} hr`)}
-            </div>
+            {(quota.rpd_used_pct > 0 || quota.daily_available_pct < 100) && (
+              <div className="quotaMergedReset">
+                resets {Math.max(1, quota.rpd_used_pct)}% /{" "}
+                {quota.reset_duration_label ||
+                  (quota.reset_in_minutes < 60
+                    ? `${quota.reset_in_minutes} ${quota.reset_in_minutes === 1 ? "min" : "mins"}`
+                    : (() => {
+                        const hrs = Number((quota.reset_in_minutes / 60).toFixed(1));
+                        return `${hrs} ${hrs === 1 ? "hour" : "hours"}`;
+                      })())}
+              </div>
+            )}
           </div>
         )}
       </div>
