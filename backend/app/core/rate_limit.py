@@ -1,29 +1,28 @@
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 
 class RateLimiterMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, requests_per_minute=30):
+    def __init__(self, app, requests_per_minute: int = 30):
         super().__init__(app)
         self.limit = requests_per_minute
-        self.requests = defaultdict(list)
+        self.window = 60.0
+        self.hits: dict[str, deque[float]] = defaultdict(deque)
 
     async def dispatch(self, request, call_next):
-        # Simple in-memory limiter for MVP/single instance.
-        # Replace with Redis for multi-instance production.
-        client = request.client.host if request.client else "unknown"
-        now = time.time()
-        window = now - 60
-        recent = [t for t in self.requests[client] if t > window]
-
-        if len(recent) >= self.limit:
-            return JSONResponse(
-                status_code=429,
-                content={"detail": "Rate limit exceeded. Try again later."},
-            )
-
-        recent.append(now)
-        self.requests[client] = recent
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            ip = request.client.host if request.client else "unknown"
+            now = time.monotonic()
+            q = self.hits[ip]
+            while q and now - q[0] > self.window:
+                q.popleft()
+            if len(q) >= self.limit:
+                return JSONResponse(
+                    {"detail": "Rate limit exceeded. Please retry shortly."},
+                    status_code=429,
+                    headers={"Retry-After": "60"},
+                )
+            q.append(now)
         return await call_next(request)

@@ -1,8 +1,5 @@
 class VectorService:
-    """RAG/vector-search extension point.
-
-    Can later use FAISS or pgvector without changing the investigation API.
-    """
+    """RAG/vector-search extension point."""
 
     def index(self, documents: list[dict]) -> None:
         return None

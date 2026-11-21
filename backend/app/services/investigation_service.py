@@ -1,104 +1,90 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import re
+import asyncio
+import logging
 from urllib.parse import urlparse
 
-from app.schemas.investigation import InvestigationResponse, ResearchQuestion
-from app.services.claim_service import decompose_claim
+from app.core.config import get_settings
+from app.schemas.investigation import Claim, InvestigationResponse, ResearchQuestion
 from app.services.claim_intelligence import ClaimIntelligence
-from app.services.question_service import QuestionService
-from app.services.research_service import ResearchService
+from app.services.claim_service import decompose_claim
 from app.services.evidence_service import EvidenceService
+from app.services.groq_service import (
+    breakdown_questions,
+    decompose_claims,
+    plan_resources,
+    synthesize_investigation,
+)
+from app.services.question_service import QuestionService
+from app.services.search_service import ResearchService, search_web
 from app.services.verdict_service import VerdictService
+
+logger = logging.getLogger(__name__)
 
 
 def _raw_answer(question: str, documents: list[dict]) -> str:
-    """Produce a question-level research answer from retrieved source text.
-
-    This is deliberately not a verdict. It selects source-grounded passages
-    that answer the framed question and preserves uncertainty when retrieval
-    is insufficient.
-    """
     if not documents:
-        return "No source page was successfully retrieved for this question."
-
-    terms = [t.lower() for t in re.findall(r"[a-zA-Z0-9]+", question) if len(t) >= 4]
-    candidates: list[tuple[float, str, dict]] = []
-    for doc in documents:
-        text = re.sub(r"\s+", " ", doc.get("text", "")).strip()
-        if not text:
-            continue
-        sentences = re.split(r"(?<=[.!?])\s+", text)
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if len(sentence) < 45:
-                continue
-            lower = sentence.lower()
-            hits = sum(1 for term in terms if term in lower)
-            # Prefer sentences that answer the question, then primary sources.
-            score = hits / max(2, len(terms))
-            if any(x in lower for x in ("prime minister", "union government", "central government", "government of india", "lok sabha", "election", "formed the government", "forms the government")):
-                score += .18
-            score += min(.20, float(doc.get("source_score", 0)) * .20)
-            candidates.append((score, sentence[:900], doc))
-
-    if not candidates:
-        return "Source pages were retrieved, but no usable textual passage was extracted."
-
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    selected: list[str] = []
-    domains: set[str] = set()
-    for _, sentence, doc in candidates:
-        domain = urlparse(doc.get("url", "")).netloc.lower()
-        if sentence in selected:
-            continue
-        selected.append(sentence)
-        if domain:
-            domains.add(domain)
-        if len(selected) >= 3:
-            break
-
-    source_note = ""
-    if selected:
-        top = candidates[0][2]
-        source_note = f" Source: {top.get('title', 'retrieved source')} ({urlparse(top.get('url', '')).netloc.removeprefix('www.')})."
-    return " ".join(selected) + source_note
+        return "No source page was retrieved for this research question."
+    top = documents[0]
+    snippet = str(top.get("content") or top.get("text") or "").strip()[:500]
+    domain = urlparse(top.get("url", "")).netloc.removeprefix("www.")
+    if not snippet:
+        snippet = top.get("title", "Relevant source found.")
+    return f"{snippet} (Source: {top.get('title', 'Retrieved source')} — {domain})"
 
 
-def investigate(text: str) -> InvestigationResponse:
-    claims = decompose_claim(text)
+async def investigate_async(text: str) -> InvestigationResponse:
+    settings = get_settings()
     claim_analysis = ClaimIntelligence.analyze(text)
-    questions = QuestionService.frame(text, claim_analysis)
-    researcher = ResearchService()
-    evidence_service = EvidenceService()
-    verdict_service = VerdictService()
+    use_ai = bool(settings.groq_api_key and settings.groq_api_key.strip())
 
-    # Each framed question is independently researched. This is the research
-    # layer; it does not decide the original claim.
-    results: list[tuple[int, str, list[dict]]] = []
-
-    def research_one(item: tuple[int, str]) -> tuple[int, str, list[dict]]:
-        index, question = item
+    # 1. Claim decomposition (LLM with deterministic fallback)
+    claims: list[Claim] = []
+    if use_ai:
         try:
-            return index, question, researcher.search(question)
-        except Exception:
-            return index, question, []
+            ai_claims = await decompose_claims(text)
+            claims = [
+                Claim(id=i, text=c["claim"], type=c.get("type", "statement"))
+                for i, c in enumerate(ai_claims, start=1)
+            ]
+        except Exception as exc:
+            logger.warning("LLM claim decomposition failed, using fallback: %s", exc)
+    if not claims:
+        claims = decompose_claim(text)
 
-    with ThreadPoolExecutor(max_workers=min(5, len(questions) or 1)) as pool:
-        futures = [pool.submit(research_one, item) for item in enumerate(questions, start=1)]
-        for future in as_completed(futures):
-            results.append(future.result())
+    # 2. Research question framing (LLM with clean keyword fallback)
+    questions: list[str] = []
+    if use_ai:
+        try:
+            questions = await breakdown_questions(text)
+        except Exception as exc:
+            logger.warning("LLM question breakdown failed, using fallback: %s", exc)
+    if not questions:
+        questions = QuestionService.frame(text, claim_analysis)
 
-    results.sort(key=lambda x: x[0])
+    # 3. Context-aware resource planning
+    resource_plan: dict = {}
+    if use_ai:
+        try:
+            resource_plan = await plan_resources(text, questions)
+        except Exception as exc:
+            logger.warning("LLM resource planning failed: %s", exc)
 
-    # Deduplicate source documents across question research while retaining
-    # which questions generated the research.
+    # 4. Concurrent multi-provider web search (DDGS + Google News RSS)
+    search_tasks = [search_web(q, resource_plan=resource_plan) for q in questions]
+    batch_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
     documents: list[dict] = []
     seen_urls: set[str] = set()
-    question_models: list[ResearchQuestion] = []
-    for index, question, docs in results:
-        unique_docs = []
+    docs_by_question: list[tuple[int, str, list[dict]]] = []
+
+    for idx, (question, res) in enumerate(zip(questions, batch_results), start=1):
+        if isinstance(res, Exception):
+            logger.exception("Search failed for question %r: %s", question, res)
+            docs = []
+        else:
+            docs = res
+        docs_by_question.append((idx, question, docs))
         for doc in docs:
             url = doc.get("url", "")
             if url and url not in seen_urls:
@@ -106,48 +92,89 @@ def investigate(text: str) -> InvestigationResponse:
                 enriched = dict(doc)
                 enriched["research_question"] = question
                 documents.append(enriched)
-            if url and url not in {d.get("url") for d in unique_docs}:
-                enriched = dict(doc)
-                enriched["research_question"] = question
-                unique_docs.append(enriched)
+
+    # Sort combined pool by relevance & source quality and assign stable E01..E15 IDs
+    documents.sort(
+        key=lambda x: (x.get("relevance_score", 0), x.get("source_quality", 0)),
+        reverse=True,
+    )
+    documents = documents[:15]
+    for i, doc in enumerate(documents, start=1):
+        doc["evidence_id"] = f"E{i:02d}"
+
+    # 5. Synthesis & Evidence Extraction (Groq AI with deterministic fallback)
+    llm_synthesis: dict = {}
+    if use_ai and documents:
+        try:
+            llm_synthesis = await synthesize_investigation(text, questions, documents)
+        except Exception as exc:
+            logger.warning("LLM synthesis failed, falling back to deterministic verdict: %s", exc)
+
+    evidence_service = EvidenceService()
+    evidence = evidence_service.extract(
+        documents,
+        text,
+        llm_assessments=llm_synthesis.get("evidence_assessments"),
+    )
+
+    if llm_synthesis and llm_synthesis.get("verdict"):
+        verdict_label = str(llm_synthesis["verdict"]).upper()
+        try:
+            confidence = max(0, min(100, int(round(float(llm_synthesis.get("confidence", 0))))))
+        except (TypeError, ValueError):
+            confidence = 50
+        explanation = str(llm_synthesis.get("explanation") or "").strip()
+        evidence_analysis = llm_synthesis.get("analysis") if isinstance(llm_synthesis.get("analysis"), dict) else {}
+    else:
+        verdict_data = VerdictService().evaluate(text, evidence)
+        verdict_label = verdict_data["verdict"]
+        confidence = verdict_data["confidence"]
+        explanation = verdict_data["explanation"]
+        evidence_analysis = verdict_data["analysis"]
+
+    # Map LLM question answers if available
+    ai_q_answers = {
+        str(item.get("question", "")).strip().lower(): str(item.get("answer", "")).strip()
+        for item in llm_synthesis.get("question_answers", [])
+        if isinstance(item, dict) and item.get("answer")
+    }
+
+    researcher = ResearchService()
+    question_models: list[ResearchQuestion] = []
+    for idx, question, docs in docs_by_question:
+        ans = ai_q_answers.get(question.lower()) or _raw_answer(question, docs)
         question_models.append(
             ResearchQuestion(
-                id=index,
+                id=idx,
                 question=question,
-                raw_answer=_raw_answer(question, docs),
+                raw_answer=ans,
                 sources=researcher.normalize(docs),
                 evidence_count=len(docs),
                 status="researched" if docs else "no_results",
             )
         )
 
-    # Final evidence analysis is performed against the ORIGINAL investigation
-    # input, using the complete evidence pool produced by all sub-questions.
-    evidence = evidence_service.extract(documents, text)
-    verdict = verdict_service.evaluate(text, evidence)
-
     return InvestigationResponse(
         claim=text,
         claims=claims,
-        verdict=verdict["verdict"],
-        confidence=verdict["confidence"],
-        explanation=verdict["explanation"],
+        verdict=verdict_label,
+        confidence=confidence,
+        explanation=explanation,
         evidence=evidence,
         sources=researcher.normalize(documents),
         status="complete" if documents else "no_results",
         methodology=[
-            "Claim understanding: subject, jurisdiction and time",
-            "Investigation broken into independently researchable questions",
-            "Each question researched separately across the web",
-            "Each framed question produces a source-grounded raw research answer",
-            "Raw question answers remain separate from the final verdict",
-            "The final synthesis answers the original investigation input, not the sub-questions",
-            "Search results used for discovery; only retrieved page content enters evidence",
-            "All question evidence combined and evaluated against the original claim",
-            "Contradiction, scope, temporal and source-quality checks",
-            "Evidence-weighted final verdict with uncertainty",
+            "Claim normalization and atomic decomposition",
+            "Context-aware research question framing & resource planning",
+            "Concurrent multi-provider live web search (DDGS + Google News RSS)",
+            "Source authority classification and URL deduplication",
+            "Evidence-grounded AI synthesis with deterministic fallback",
         ],
         claim_analysis=claim_analysis,
-        evidence_analysis=verdict.get("analysis", {}),
+        evidence_analysis=evidence_analysis,
         research_questions=question_models,
     )
+
+
+def investigate(text: str) -> InvestigationResponse:
+    return asyncio.run(investigate_async(text))

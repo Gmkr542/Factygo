@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class ClaimIntelligence:
-    """Deterministic claim normalization used before web evidence is judged."""
+    """Deterministic claim normalization used alongside LLM decomposition."""
 
     UNION_TERMS = {
         "centre", "center", "central government", "union government", "government of india",
-        "national government", "central govt", "union govt", "lok sabha government",
+        "national government", "central govt", "union govt", "lok sabha",
     }
-    STATE_TERMS = {"state government", "state", "kerala", "tamil nadu", "karnataka", "telangana", "andhra pradesh", "rajasthan", "punjab", "himachal pradesh", "chhattisgarh", "west bengal", "odisha", "assam", "goa", "maharashtra", "gujarat", "madhya pradesh", "uttar pradesh", "bihar", "jharkhand", "uttarakhand", "haryana", "manipur", "meghalaya", "mizoram", "nagaland", "tripura", "sikkim", "arunachal pradesh"}
-    PARTY_TERMS = {"congress", "inc", "indian national congress", "bjp", "aap", "dmk", "tdp", "ycp"}
+    HEALTH_TERMS = {
+        "cholesterol", "blood pressure", "diabetes", "cancer", "vaccine", "vitamin",
+        "lemon", "garlic", "turmeric", "cure", "treats", "prevents", "symptom", "clinical",
+    }
+    FINANCE_TERMS = {
+        "inflation", "gdp", "rbi", "interest rate", "stock", "tax", "budget", "recession",
+    }
 
     @classmethod
     def analyze(cls, claim: str) -> dict:
@@ -20,17 +25,23 @@ class ClaimIntelligence:
         lower = text.lower()
         year_match = re.search(r"\b(20\d{2})\b", lower)
         year = int(year_match.group(1)) if year_match else None
-        if not year and any(x in lower for x in ("current", "today", "now")):
-            year = datetime.utcnow().year
+        if not year and any(x in lower for x in ("current", "today", "now", "latest")):
+            year = datetime.now(timezone.utc).year
 
-        jurisdiction = "UNION" if any(term in lower for term in cls.UNION_TERMS) else "STATE" if any(term in lower for term in cls.STATE_TERMS) else "UNKNOWN"
-        subject = "Indian National Congress" if any(t in lower for t in ("congress", "inc", "indian national congress")) else "UNKNOWN"
-        claim_type = "political_power" if subject != "UNKNOWN" and any(t in lower for t in ("ruling", "government", "power", "in power", "governing")) else "general"
+        if any(t in lower for t in cls.HEALTH_TERMS):
+            domain = "health_science"
+        elif any(t in lower for t in cls.FINANCE_TERMS):
+            domain = "economics_finance"
+        elif any(t in lower for t in cls.UNION_TERMS):
+            domain = "indian_union_politics"
+        else:
+            domain = "general"
+
+        jurisdiction = "UNION" if any(t in lower for t in cls.UNION_TERMS) else "GLOBAL"
         return {
             "normalized": text,
-            "subject": subject,
+            "domain": domain,
             "jurisdiction": jurisdiction,
             "year": year,
-            "claim_type": claim_type,
-            "scope_terms": sorted(cls.UNION_TERMS & set(re.findall(r"[a-z ]+", lower))) if jurisdiction == "UNION" else [],
+            "is_question": text.endswith("?") or bool(re.match(r"^(is|are|was|were|does|do|did|can|who|what|when|where|why|how)\b", lower)),
         }
