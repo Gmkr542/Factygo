@@ -454,21 +454,9 @@ export default function Home() {
   return (
     <main className={"appShell" + (isActiveView ? " workspaceActive" : " workspaceIdle")}>
       <div className="topBar">
-        <div className="brandLeftWrap">
-          <div className="brandGroup">
-            <div className="brandMark"><span className="brandDot" />FACTYGO</div>
-            <span className="brandSubTag">EVIDENCE-FIRST VERIFICATION</span>
-          </div>
-          {isActiveView && (
-            <button
-              type="button"
-              className="homeBackBtn"
-              onClick={resetToHome}
-              title="Back to Home"
-            >
-              ← Home
-            </button>
-          )}
+        <div className="brandGroup">
+          <div className="brandMark"><span className="brandDot" />FACTYGO</div>
+          <span className="brandSubTag">EVIDENCE-FIRST VERIFICATION</span>
         </div>
         {quota && (() => {
           const tPct = quota.tpd_available_pct ?? quota.daily_available_pct ?? 100;
@@ -635,7 +623,18 @@ export default function Home() {
           )}
         </div>
         <div className="searchFooter">
-          {!isActiveView && <span className="hint">Ctrl/Cmd + Enter to run · Auto-detects DOIs, PMIDs, arXiv &amp; URLs</span>}
+          {isActiveView ? (
+            <button
+              type="button"
+              className="homeBackBtn"
+              onClick={resetToHome}
+              title="Back to Home"
+            >
+              ← Back
+            </button>
+          ) : (
+            <span className="hint">Ctrl/Cmd + Enter to run · Auto-detects DOIs, PMIDs, arXiv &amp; URLs</span>
+          )}
           <button className="primaryButton" onClick={() => investigate()} disabled={loading || !text.trim()}>
             {loading ? <><span className="spinner" /> Investigating…</> : <>{mode === "audit_ai" ? "Audit Citations" : "Investigate"} <span>→</span></>}
           </button>

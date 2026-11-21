@@ -1253,3 +1253,13 @@ textarea {
 .homeBackBtn:active {
   transform: scale(0.98);
 }
+
+
+.searchFooter .homeBackBtn {
+  padding: 6px 13px;
+  font-size: 12.5px;
+}
+
+.searchFooter .primaryButton {
+  margin-left: auto;
+}
