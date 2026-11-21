@@ -24,6 +24,13 @@ const SAMPLE_PROMPTS = [
   { text: "Solar panels generate zero electricity on cloudy days", tag: "Energy" },
 ];
 
+const LOADING_STEPS = [
+  "Decomposing claim and framing research questions…",
+  "Searching PubMed, news, and authoritative web sources…",
+  "Cross-checking evidence stances and independent domains…",
+  "Synthesizing final grounded verdict…",
+];
+
 function label(value) {
   return String(value || "").replaceAll("_", " ").toUpperCase();
 }
@@ -41,6 +48,16 @@ function confidenceTone(value) {
   if (n >= 75) return "high";
   if (n >= 45) return "medium";
   return "low";
+}
+
+function extractDomain(url, fallback = "") {
+  if (fallback) return fallback;
+  if (!url) return "";
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
 }
 
 function splitReport(explanation) {
@@ -73,11 +90,56 @@ function splitReport(explanation) {
   };
 }
 
+function renderWithCitations(text, evidenceById, sources) {
+  const str = String(text || "");
+  if (!str) return null;
+  const parts = str.split(/(\(\s*E\d{1,2}(?:\s*,\s*E\d{1,2})*\s*\)|\[\s*E\d{1,2}(?:\s*,\s*E\d{1,2})*\s*\])/g);
+  return parts.map((part, idx) => {
+    const match = part.match(/^[\(\[]\s*(E\d{1,2}(?:\s*,\s*E\d{1,2})*)\s*[\)\]]$/);
+    if (!match) return <span key={idx}>{part}</span>;
+    const ids = match[1].split(",").map(s => s.trim());
+    return (
+      <span key={idx} className="citationCluster">
+        {ids.map(eid => {
+          const ev = evidenceById[eid];
+          const numIdx = parseInt(eid.replace(/\D/g, ""), 10) - 1;
+          const fallbackSrc = !ev && numIdx >= 0 && sources[numIdx] ? sources[numIdx] : null;
+          const url = ev?.source_url || fallbackSrc?.url || "";
+          const title = ev?.source_title || fallbackSrc?.title || eid;
+          const domain = extractDomain(url, ev?.publisher || fallbackSrc?.domain || "");
+          if (!url) {
+            return (
+              <sup key={eid} className="citationPill" title={title}>
+                {eid}
+              </sup>
+            );
+          }
+          return (
+            <sup key={eid}>
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="citationPill"
+                title={`${eid}: ${title}${domain ? ` (${domain})` : ""}`}
+              >
+                {eid}
+              </a>
+            </sup>
+          );
+        })}
+      </span>
+    );
+  });
+}
+
 export default function Home() {
   const [text, setText] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(0);
   const [tab, setTab] = useState("verdict");
+  const [copied, setCopied] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [shuffledPrompts, setShuffledPrompts] = useState(SAMPLE_PROMPTS);
   const searchBoxRef = useRef(null);
@@ -101,6 +163,17 @@ export default function Home() {
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
 
+  useEffect(() => {
+    if (!loading) {
+      setLoadingStep(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setLoadingStep(prev => (prev < LOADING_STEPS.length - 1 ? prev + 1 : prev));
+    }, 2600);
+    return () => clearInterval(interval);
+  }, [loading]);
+
   const filteredSuggestions = useMemo(() => {
     const q = text.trim().toLowerCase();
     if (!q) return shuffledPrompts;
@@ -118,6 +191,7 @@ export default function Home() {
     setLoading(true);
     setResult(null);
     setTab("verdict");
+    setCopied(false);
 
     try {
       const controller = new AbortController();
@@ -150,6 +224,16 @@ export default function Home() {
 
   const evidence = result?.evidence || [];
   const sources = result?.sources || [];
+
+  const evidenceById = useMemo(() => {
+    const map = {};
+    evidence.forEach((e, idx) => {
+      const eid = e.evidence_id || `E${String(idx + 1).padStart(2, "0")}`;
+      map[eid] = e;
+    });
+    return map;
+  }, [evidence]);
+
   const supporting = useMemo(
     () => evidence.filter(e => String(e.stance).toLowerCase() === "supporting"),
     [evidence]
@@ -162,20 +246,25 @@ export default function Home() {
     () => evidence.filter(e => String(e.stance).toLowerCase() === "contextual"),
     [evidence]
   );
+
+  const ratio = useMemo(() => {
+    const total = supporting.length + contradicting.length + contextual.length;
+    if (!total) return { sup: 0, con: 0, ctx: 0, total: 0 };
+    return {
+      sup: (supporting.length / total) * 100,
+      con: (contradicting.length / total) * 100,
+      ctx: (contextual.length / total) * 100,
+      total,
+    };
+  }, [supporting.length, contradicting.length, contextual.length]);
+
   const domains = useMemo(() => {
     if (result?.evidence_analysis?.independent_domains != null && result.evidence_analysis.independent_domains > 0) {
       return result.evidence_analysis.independent_domains;
     }
     const hosts = new Set(
       sources
-        .map(s => {
-          if (s.domain) return s.domain;
-          try {
-            return new URL(s.url).hostname.replace(/^www\./, "");
-          } catch {
-            return "";
-          }
-        })
+        .map(s => extractDomain(s.url, s.domain))
         .filter(Boolean)
     );
     return hosts.size;
@@ -184,6 +273,37 @@ export default function Home() {
   const confidence = Number(result?.confidence || 0);
   const noResults = result && !result.error && !evidence.length && !sources.length;
   const { summary, breakdown } = useMemo(() => splitReport(result?.explanation), [result?.explanation]);
+
+  async function copyMarkdownReport() {
+    if (!result) return;
+    const lines = [
+      `# Factygo Investigation Report`,
+      `**Claim:** ${result.claim || text}`,
+      `**Verdict:** ${label(result.verdict)} (${confidence}% confidence)`,
+      `**Independent Domains:** ${domains}`,
+      ``,
+      `## Summary`,
+      summary,
+      ``,
+      `## Verdict Breakdown`,
+      breakdown,
+      ``,
+      `## Evidence Counts`,
+      `- Supporting: ${supporting.length}`,
+      `- Contradicting: ${contradicting.length}`,
+      `- Contextual: ${contextual.length}`,
+      ``,
+      `## Sources (${sources.length})`,
+      ...sources.map((s, idx) => `${idx + 1}. [${s.title || s.url}](${s.url})`),
+    ];
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2200);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   return (
     <main className="appShell">
@@ -262,11 +382,19 @@ export default function Home() {
       </section>
 
       {loading && (
-        <section className="loadingCard">
+        <section className="loadingCard shimmerCard" aria-live="polite">
           <div className="loadingIcon"><span className="spinner dark" /></div>
-          <div>
-            <strong>Investigating claim</strong>
-            <p>Searching the web and evaluating available evidence…</p>
+          <div className="loadingBody">
+            <div className="loadingHeaderRow">
+              <strong>Investigating claim</strong>
+              <span className="stepPill">Step {loadingStep + 1} of {LOADING_STEPS.length}</span>
+            </div>
+            <p>{LOADING_STEPS[loadingStep]}</p>
+            <div className="stepTrack" aria-hidden="true">
+              {LOADING_STEPS.map((_, i) => (
+                <span key={i} className={"stepDot" + (i <= loadingStep ? " active" : "")} />
+              ))}
+            </div>
           </div>
         </section>
       )}
@@ -286,11 +414,21 @@ export default function Home() {
         <section className="investigationCard">
           <div className="resultHero">
             <div className="verdictBlock">
-              <div className={"verdictBadge " + verdictTone(result.verdict)}>
-                <span className="verdictDot" />
-                {label(result.verdict)}
+              <div className="verdictTopRow">
+                <div className={"verdictBadge " + verdictTone(result.verdict)}>
+                  <span className="verdictDot" />
+                  {label(result.verdict)}
+                </div>
+                <button
+                  type="button"
+                  className={"copyReportBtn" + (copied ? " copied" : "")}
+                  onClick={copyMarkdownReport}
+                  title="Copy formatted Markdown report"
+                >
+                  {copied ? "✓ Copied Report" : "⧉ Copy Report"}
+                </button>
               </div>
-              <h2>{summary}</h2>
+              <h2>{renderWithCitations(summary, evidenceById, sources)}</h2>
               <div className="metaLine">
                 <span>{label(result.status || "complete")}</span>
                 <span>•</span>
@@ -336,7 +474,30 @@ export default function Home() {
                 </div>
               ) : (
                 <>
-                  <p className="leadText">{breakdown}</p>
+                  <p className="leadText">{renderWithCitations(breakdown, evidenceById, sources)}</p>
+
+                  {ratio.total > 0 && (
+                    <div className="ratioWrap">
+                      <div className="ratioLegend">
+                        <span>Evidence Distribution</span>
+                        <span>
+                          {supporting.length} supporting · {contradicting.length} contradicting · {contextual.length} context
+                        </span>
+                      </div>
+                      <div className="ratioBar" role="img" aria-label="Evidence stance distribution">
+                        {ratio.sup > 0 && (
+                          <div className="ratioSeg sup" style={{ width: ratio.sup + "%" }} title={`Supporting: ${supporting.length}`} />
+                        )}
+                        {ratio.con > 0 && (
+                          <div className="ratioSeg con" style={{ width: ratio.con + "%" }} title={`Contradicting: ${contradicting.length}`} />
+                        )}
+                        {ratio.ctx > 0 && (
+                          <div className="ratioSeg ctx" style={{ width: ratio.ctx + "%" }} title={`Contextual: ${contextual.length}`} />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="statGrid">
                     <div className="statBox"><span>SUPPORTING</span><strong>{supporting.length}</strong></div>
                     <div className="statBox"><span>CONTRADICTING</span><strong>{contradicting.length}</strong></div>
@@ -370,24 +531,38 @@ export default function Home() {
               </div>
               {evidence.length ? (
                 <div className="cardStack">
-                  {evidence.map((e, i) => (
-                    <article className="evidenceCard" key={e.id || e.evidence_id || i}>
-                      <div className="cardTopRow">
-                        <span className={"stance " + String(e.stance).toLowerCase()}>{label(e.stance)}</span>
-                        <div className="pillGroup">
-                          {e.relevance != null && <span className="metaPill">Relevance {Math.round(Number(e.relevance) <= 1 ? Number(e.relevance) * 100 : Number(e.relevance))}%</span>}
-                          {e.strength != null && <span className="metaPill">Strength {Math.round(Number(e.strength) <= 1 ? Number(e.strength) * 100 : Number(e.strength))}%</span>}
+                  {evidence.map((e, i) => {
+                    const eid = e.evidence_id || `E${String(i + 1).padStart(2, "0")}`;
+                    return (
+                      <article className="evidenceCard" key={e.id || eid}>
+                        <div className="cardTopRow">
+                          <div className="pillGroup">
+                            <span className="idBadge">{eid}</span>
+                            <span className={"stance " + String(e.stance).toLowerCase()}>{label(e.stance)}</span>
+                          </div>
+                          <div className="pillGroup">
+                            {e.relevance != null && (
+                              <span className="metaPill">
+                                Relevance {Math.round(Number(e.relevance) <= 1 ? Number(e.relevance) * 100 : Number(e.relevance))}%
+                              </span>
+                            )}
+                            {e.strength != null && (
+                              <span className="metaPill">
+                                Strength {Math.round(Number(e.strength) <= 1 ? Number(e.strength) * 100 : Number(e.strength))}%
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      <blockquote className="excerptText">“{e.excerpt}”</blockquote>
-                      {e.reason && <p className="reasonText">{e.reason}</p>}
-                      {e.source_url && (
-                        <a className="sourceLink" href={e.source_url} target="_blank" rel="noreferrer">
-                          Open original source ↗
-                        </a>
-                      )}
-                    </article>
-                  ))}
+                        <blockquote className="excerptText">“{e.excerpt}”</blockquote>
+                        {e.reason && <p className="reasonText">{e.reason}</p>}
+                        {e.source_url && (
+                          <a className="sourceLink" href={e.source_url} target="_blank" rel="noreferrer">
+                            Open original source ↗
+                          </a>
+                        )}
+                      </article>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="emptyBox">
@@ -408,23 +583,34 @@ export default function Home() {
               {sources.length ? (
                 <div className="cardStack">
                   {sources.map((s, i) => {
-                    let displayDomain = s.domain || "";
-                    if (!displayDomain && s.url) {
-                      try {
-                        displayDomain = new URL(s.url).hostname.replace(/^www\./, "");
-                      } catch {
-                        displayDomain = "Unknown domain";
-                      }
-                    }
+                    const displayDomain = extractDomain(s.url, s.domain);
+                    const faviconUrl = displayDomain
+                      ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(displayDomain)}&sz=32`
+                      : "";
                     return (
                       <article className="sourceCard" key={s.url || i}>
-                        <div className="sourceMain">
-                          <a className="sourceTitle" href={s.url} target="_blank" rel="noreferrer">
-                            {s.title || s.url} ↗
-                          </a>
-                          <span className="sourceDomain">{displayDomain || "Unknown domain"}</span>
+                        <div className="sourceIdentity">
+                          {faviconUrl ? (
+                            <img
+                              src={faviconUrl}
+                              alt=""
+                              width={18}
+                              height={18}
+                              className="sourceFavicon"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <span className="sourceFaviconFallback">🌐</span>
+                          )}
+                          <div className="sourceMain">
+                            <a className="sourceTitle" href={s.url} target="_blank" rel="noreferrer">
+                              {s.title || s.url} ↗
+                            </a>
+                            <span className="sourceDomain">{displayDomain || "Unknown domain"}</span>
+                          </div>
                         </div>
                         <div className="pillGroup">
+                          {s.source_type && <span className="authorityPill">{s.source_type}</span>}
                           {s.source_tier && <span className="metaPill">Tier {s.source_tier}</span>}
                           {s.source_score != null && (
                             <span className="metaPill">{Math.round(s.source_score * 100)}/100</span>
