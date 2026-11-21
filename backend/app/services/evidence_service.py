@@ -5,8 +5,6 @@ from app.services.claim_intelligence import ClaimIntelligence
 
 
 class EvidenceService:
-    """Transform retrieved documents into structured FactyGo evidence items."""
-
     STOPWORDS = {
         "the", "and", "for", "with", "that", "this", "from", "into", "about",
         "is", "are", "in", "of", "to", "a", "an", "on", "was", "were", "does",
@@ -50,6 +48,7 @@ class EvidenceService:
                 "evidence_id": eid,
                 "source_title": title,
                 "publisher": doc.get("publisher", ""),
+                "domain": doc.get("domain", ""),
                 "source_url": doc.get("url", ""),
                 "excerpt": excerpt[:1400],
                 "stance": stance,
@@ -57,6 +56,7 @@ class EvidenceService:
                 "source_score": round(source_score, 2),
                 "source_tier": doc.get("tier", 3),
                 "source_type": doc.get("source_type", "Web Source"),
+                "full_article_read": bool(doc.get("full_article_read", False)),
                 "jurisdiction_match": True,
                 "temporal_match": self._time_match(f"{title} {excerpt}", meta.get("year")),
                 "strength": strength,
@@ -94,10 +94,10 @@ class EvidenceService:
 
     @staticmethod
     def _heuristic_stance(lower: str) -> tuple[str, str]:
-        contra_cues = ("no evidence", "does not", "do not", "myth", "false", "unlikely", "insufficient evidence", "not proven", "contradict", "debunk")
+        contra_cues = ("no evidence", "does not", "do not", "myth", "false", "unlikely", "insufficient evidence", "not proven", "contradict", "debunk", "overtake", "surpasses")
         support_cues = ("study shows", "clinical trial", "significantly reduced", "lowered cholesterol", "confirmed", "evidence shows", "found that")
         if any(c in lower for c in contra_cues):
-            return "contradicting", "Passage indicates lack of evidence or contradicts the claim."
+            return "contradicting", "Passage contradicts or refutes the claim."
         if any(c in lower for c in support_cues):
             return "supporting", "Passage reports findings consistent with the claim."
         return "contextual", "Relevant source passage providing context on the topic."

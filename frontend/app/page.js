@@ -5,21 +5,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 const SAMPLE_PROMPTS = [
+  { text: "Everyday moon is orange", tag: "Science" },
   { text: "India is less populated country", tag: "Fact Check" },
   { text: "Lemon juice reduces diabetes", tag: "Health" },
-  { text: "Drinking green tea prevents heart disease", tag: "Medical" },
-  { text: "India's Chandrayaan-3 landed near the lunar south pole in August 2023", tag: "Space" },
-  { text: "The Great Wall of China is visible from the Moon with the naked eye", tag: "Science" },
-  { text: "Does intermittent fasting improve insulin sensitivity?", tag: "Question" },
-  { text: "Antibiotics are effective against viral infections like the common cold", tag: "Medical" },
   { text: "Solar panels generate zero electricity on cloudy days", tag: "Energy" },
+  { text: "India's Chandrayaan-3 landed near the lunar south pole in 2023, which was 3 years ago", tag: "Multi-Claim + Math" },
+  { text: "The Great Wall of China is visible from the Moon with the naked eye", tag: "Astronomy" },
+  { text: "Does intermittent fasting improve insulin sensitivity?", tag: "Medical" },
+  { text: "Antibiotics are effective against viral infections like the common cold", tag: "Health" },
 ];
 
 const LOADING_STEPS = [
-  "Decomposing claim and framing research questions…",
-  "Searching PubMed, news, and authoritative web sources…",
-  "Cross-checking evidence stances and independent domains…",
-  "Synthesizing final grounded verdict…",
+  "Decomposing sub-claims & routing knowledge mode…",
+  "Searching PubMed, Wikipedia, news, and authoritative sources…",
+  "Deep-reading top articles & running symbolic math/date checks…",
+  "Synthesizing grounded verdict with citations…",
 ];
 
 function label(value) {
@@ -130,7 +130,7 @@ export default function Home() {
     }
     const interval = setInterval(() => {
       setLoadingStep(prev => (prev < LOADING_STEPS.length - 1 ? prev + 1 : prev));
-    }, 2600);
+    }, 2400);
     return () => clearInterval(interval);
   }, [loading]);
 
@@ -183,6 +183,8 @@ export default function Home() {
 
   const evidence = result?.evidence || [];
   const sources = result?.sources || [];
+  const claimVerdicts = result?.claim_verdicts || [];
+  const computedFacts = result?.computed_facts || [];
 
   const evidenceById = useMemo(() => {
     const map = {};
@@ -193,7 +195,6 @@ export default function Home() {
     return map;
   }, [evidence]);
 
-  // Unified clickable Web Sources + Evidence items
   const unifiedItems = useMemo(() => {
     if (evidence.length) {
       return evidence.map((e, idx) => {
@@ -211,6 +212,7 @@ export default function Home() {
           reason: e.reason || "",
           stance: String(e.stance || "contextual").toLowerCase(),
           sourceType: e.source_type || matchedSource.source_type || "Web Source",
+          fullArticleRead: Boolean(e.full_article_read),
           score: e.source_score ?? matchedSource.source_score ?? 0.65,
         };
       });
@@ -228,6 +230,7 @@ export default function Home() {
         reason: "",
         stance: "contextual",
         sourceType: s.source_type || "Web Source",
+        fullArticleRead: false,
         score: s.source_score ?? 0.65,
       };
     });
@@ -394,7 +397,7 @@ export default function Home() {
 
       {result && !result.error && (
         <section className="investigationCard">
-          {/* 1. Unified Hero & Metadata Strip (Verdict + Claim + Analysis Combined) */}
+          {/* 1. Unified Hero & Metadata Strip */}
           <div className="resultHero">
             <div className="verdictBlock">
               <div className="verdictTopRow">
@@ -416,11 +419,28 @@ export default function Home() {
                 {renderWithCitations(result.explanation, evidenceById, sources)}
               </h2>
 
+              {/* Multi-Claim Breakdown Chips when 2+ sub-claims exist */}
+              {claimVerdicts.length > 1 && (
+                <div className="subClaimList">
+                  {claimVerdicts.map((cv, idx) => (
+                    <div key={idx} className="subClaimRow">
+                      <span className={"subClaimBadge " + verdictTone(cv.verdict)}>
+                        {label(cv.verdict)}
+                      </span>
+                      <span className="subClaimText">{cv.subclaim}</span>
+                      {cv.evidence_id && <span className="idBadge">{cv.evidence_id}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="unifiedMetaStrip">
                 <span className="metaPill">Scope: {label(result.claim_analysis?.jurisdiction || "GLOBAL")}</span>
-                <span className="metaPill">Domain: {label(result.claim_analysis?.domain || result.claim_analysis?.subject || "GENERAL")}</span>
+                <span className="metaPill">Domain: {label(result.claim_analysis?.domain || "GENERAL")}</span>
+                <span className="metaPill">
+                  Mode: {result.claim_analysis?.knowledge_mode === "hybrid_encyclopedic" ? "HYBRID SCIENCE" : "STRICT EVIDENCE"}
+                </span>
                 <span className="metaPill">{domains} Independent {domains === 1 ? "Domain" : "Domains"}</span>
-                {result.claim_analysis?.year && <span className="metaPill">Year: {result.claim_analysis.year}</span>}
               </div>
 
               {ratio.total > 0 && (
@@ -510,6 +530,7 @@ export default function Home() {
                         <div className="pillGroup">
                           <span className="idBadge">{item.id}</span>
                           <span className={"stance " + item.stance}>{label(item.stance)}</span>
+                          {item.fullArticleRead && <span className="deepReadPill">Full Article</span>}
                           <span className="authorityPill">{item.sourceType}</span>
                           <span className="metaPill">{Math.round(Number(item.score) * 100)}/100</span>
                         </div>
@@ -527,16 +548,27 @@ export default function Home() {
               </div>
             )}
 
-            {/* 3. Collapsible Research Queries & Methodology Drawer */}
+            {/* 3. Collapsible Research Queries, Symbolic Logic & Methodology Drawer */}
             <details className="researchDrawer">
               <summary>
-                <span>Research queries & methodology ({(result.research_questions || []).length} queries)</span>
+                <span>Research queries, symbolic logic & methodology ({(result.research_questions || []).length} queries)</span>
                 <span className="drawerChevron">▾</span>
               </summary>
               <div className="drawerContent">
                 <div className="drawerClaimBox">
                   <strong>Investigated Input:</strong> {result.claim || text}
                 </div>
+
+                {computedFacts.length > 0 && (
+                  <div className="drawerLogicBox">
+                    <strong>Deterministic Symbolic & Temporal Checks</strong>
+                    <ul>
+                      {computedFacts.map((fact, idx) => (
+                        <li key={idx}>{fact}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
                 {(result.research_questions || []).map((q) => (
                   <div className="drawerQuestionItem" key={q.id}>

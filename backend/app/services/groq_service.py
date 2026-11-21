@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import math
 import re
 import time
 
@@ -13,7 +12,7 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are the analysis engine for Factygo, a neutral evidence-first fact-checking and research platform. Use ONLY the retrieved evidence supplied in the prompt for factual conclusions. Never invent sources, URLs, quotations, statistics, dates, studies, or evidence IDs. If evidence is insufficient, assign UNVERIFIED. Return ONLY valid JSON."""
+SYSTEM_PROMPT = """You are the verification and synthesis engine for Factygo, a neutral evidence-first fact-checking platform. Use retrieved evidence and verified symbolic/math computations for factual conclusions. Never invent sources, URLs, quotations, statistics, or evidence IDs. Return ONLY valid JSON."""
 
 _model_cache: tuple[float, set[str]] | None = None
 MODEL_CACHE_SECONDS = 300
@@ -165,7 +164,6 @@ async def _request_impl(model: str, instruction: str) -> str:
 
 
 async def _request_bounded(model: str, instruction: str) -> str:
-    """Retry transient TPM limits up to max_ai_wait_seconds so Render HTTP requests never hang."""
     s = get_settings()
     started = time.monotonic()
     while True:
@@ -228,48 +226,13 @@ async def groq_json(instruction: str) -> dict:
     raise GroqProviderError("No available Groq text model found.") from last_err
 
 
-async def decompose_claims(text: str) -> list[dict]:
-    prompt = f"""Decompose this input into atomic, independently verifiable claims (maximum 4).
-Input: {text[:4000]!r}
-Return ONLY JSON: {{"claims":[{{"claim":"string","type":"factual|causal|numerical|political|prediction|opinion|question"}}]}}"""
-    data = await groq_json(prompt)
-    items = data.get("claims", [])
-    return [x for x in items if isinstance(x, dict) and str(x.get("claim", "")).strip()][:4]
-
-
-async def breakdown_questions(text: str) -> list[str]:
-    prompt = f"""Generate 2 to 4 concise, neutral, web-searchable research questions to verify this input accurately.
-Input: {text[:4000]!r}
-Rules:
-- Preserve exact entities, dates, and geography.
-- Keep questions short and keyword-rich so web search engines return strong sources.
-- Do not assume the claim is true or false.
-Return ONLY JSON: {{"questions":["string"]}}"""
-    data = await groq_json(prompt)
-    out = []
-    seen = set()
-    for q in data.get("questions", []):
-        qs = " ".join(str(q).split()).strip()
-        if qs and qs.lower() not in seen:
-            seen.add(qs.lower())
-            out.append(qs)
-    return out[:4]
-
-
-async def plan_resources(text: str, questions: list[str]) -> dict:
-    prompt = f"""Select the best source categories for verifying this claim.
-Input: {text[:2000]!r}
-Questions: {json.dumps(questions, ensure_ascii=False)}
-Available categories: government/official, election authority, courts/law, academic/research, medical/health authorities, financial/regulatory, reputable news, fact-checking.
-Return ONLY JSON: {{"context":"string","resource_types":["string"],"preferred_domains":["example.org"],"search_strategy":["short keyword query"]}}"""
-    data = await groq_json(prompt)
-    return data if isinstance(data, dict) else {}
-
-
 async def synthesize_investigation(
     claim: str,
+    subclaims: list[str],
     questions: list[str],
     evidence_pool: list[dict],
+    computed_facts: list[str] | None = None,
+    knowledge_mode: str = "strict_closed_book",
 ) -> dict:
     compact = [
         {
@@ -279,31 +242,47 @@ async def synthesize_investigation(
             "url": item.get("url", ""),
             "source_type": item.get("source_type", "Web Source"),
             "source_quality": item.get("source_quality", 65),
-            "content": str(item.get("content", ""))[:1200],
+            "full_article_read": bool(item.get("full_article_read", False)),
+            "content": str(item.get("content", ""))[:1600],
         }
-        for item in evidence_pool[:12]
+        for item in evidence_pool[:6]
     ]
-    prompt = f"""Evaluate the claim strictly using ONLY the retrieved evidence below. Never invent sources, quotes, or facts.
+
+    grounding_rule = (
+        "HYBRID ENCYCLOPEDIC MODE: This is a settled scientific/physical fundamental claim. Anchor your verdict in the retrieved evidence (E01..E05) AND verified textbook physics/astronomy principles (e.g. Rayleigh scattering, optics) when snippets are brief, citing retrieved sources wherever applicable."
+        if knowledge_mode == "hybrid_encyclopedic"
+        else "STRICT CLOSED-BOOK MODE: Base your verdict strictly on the retrieved evidence (E01..E05) and deterministic COMPUTED FACTS below. If evidence is insufficient, return UNVERIFIED."
+    )
+
+    prompt = f"""Evaluate the claim using the evidence and verified deterministic computations below. Never invent sources, URLs, or quotes.
 CLAIM: {claim!r}
+SUB-CLAIMS TO CHECK: {json.dumps(subclaims, ensure_ascii=False)}
 RESEARCH QUESTIONS: {json.dumps(questions, ensure_ascii=False)}
+DETERMINISTIC COMPUTED FACTS (Ground-truth math & temporal logic):
+{json.dumps(computed_facts or [], ensure_ascii=False)}
 RETRIEVED EVIDENCE:
 {json.dumps(compact, ensure_ascii=False)}
 
+{grounding_rule}
+
 Rules:
-1. Choose verdict from: TRUE, MOSTLY TRUE, PARTLY TRUE, MISLEADING, MOSTLY FALSE, FALSE, UNVERIFIED.
+1. Choose overall verdict from: TRUE, MOSTLY TRUE, PARTLY TRUE, MISLEADING, MOSTLY FALSE, FALSE, UNVERIFIED.
 2. Compute integer confidence (0-100) based on evidence quality, directness, and independent corroboration.
-3. Write "explanation" in 2 crisp, direct sentences (under 65 words total):
-   - Sentence 1: State the direct factual answer supported by the evidence with inline citations like (E01).
-   - Sentence 2: Explicitly explain any missing detail, caveat, or nuance that limits the claim (for example, an unverified date, scope, or lack of long-term trials).
-   - NEVER use filler like "The claim that..." or "Result :". State the facts directly.
-4. For each evidence item you use, classify stance as "supporting", "contradicting", or "contextual" with a 1-sentence reason and strength (0.0 to 1.0).
-5. Provide a concise answer for each research question grounded strictly in the evidence IDs.
+3. Write "explanation" in 1-2 short, direct sentences (under 55 words total) starting strictly with:
+   Result : <Title-case Verdict>, <direct factual statement answering or correcting the claim immediately with specific scientific/technical facts and inline evidence IDs like (E01)>.
+   - NEVER use filler phrases like "The claim that...", "Multiple sources indicate...", "Available evidence shows...", or "making the claim false". State the facts directly.
+4. Evaluate each sub-claim in SUB-CLAIMS TO CHECK inside "claim_verdicts" with verdict ("TRUE"|"FALSE"|"PARTLY TRUE"|"UNVERIFIED") and evidence_id ("E01" or "").
+5. For each evidence item you use, classify stance as "supporting", "contradicting", or "contextual" with a concise 1-sentence reason and strength (0.0 to 1.0).
+6. Provide a concise answer for each research question grounded strictly in the evidence IDs.
 
 Return ONLY valid JSON:
 {{
   "verdict": "TRUE|MOSTLY TRUE|PARTLY TRUE|MISLEADING|MOSTLY FALSE|FALSE|UNVERIFIED",
   "confidence": 0,
   "explanation": "Result : False, ...",
+  "claim_verdicts": [
+    {{"subclaim": "string", "verdict": "TRUE|FALSE|PARTLY TRUE|UNVERIFIED", "evidence_id": "E01"}}
+  ],
   "evidence_assessments": [
     {{"evidence_id": "E01", "stance": "supporting|contradicting|contextual", "strength": 0.85, "reason": "string"}}
   ],

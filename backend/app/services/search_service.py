@@ -25,13 +25,9 @@ _DDGS_COOLDOWN_SECONDS = 60.0
 
 _RESOURCE_DOMAINS = {
     "government/official": ["gov.in", "india.gov.in", "pib.gov.in", "pmindia.gov.in", "sansad.in", "gov"],
-    "election authority": ["eci.gov.in"],
-    "courts/law": ["sci.gov.in", "indiacode.nic.in"],
     "academic/research": ["pubmed.ncbi.nlm.nih.gov", "nature.com", "sciencedirect.com", "arxiv.org"],
-    "medical/health authorities": ["who.int", "cdc.gov", "nih.gov", "pubmed.ncbi.nlm.nih.gov", "mayoclinic.org", "healthline.com"],
-    "financial/regulatory": ["rbi.org.in", "sebi.gov.in", "sec.gov", "imf.org", "worldbank.org"],
-    "reputable news": ["reuters.com", "apnews.com", "bbc.com", "thehindu.com", "indianexpress.com"],
-    "fact-checking": ["factcheck.org", "snopes.com", "altnews.in", "boomlive.in"],
+    "medical/health authorities": ["who.int", "cdc.gov", "nih.gov", "pubmed.ncbi.nlm.nih.gov"],
+    "reputable news": ["reuters.com", "apnews.com", "bbc.com", "thehindu.com"],
 }
 
 _STOPWORDS = {
@@ -49,15 +45,15 @@ def _clean_text(value: str) -> str:
 
 def _quality(source_type: str) -> tuple[int, str, int]:
     kind = str(source_type or "").lower()
-    if kind == "government":
+    if "government" in kind or "official" in kind:
         return (95, "Primary/Official", 1)
-    if kind in {"academic/scientific", "academic"}:
-        return (92, "Academic/Scientific", 1)
+    if "academic" in kind or "reference" in kind:
+        return (90, "Academic/Reference", 1)
     if "fact-check" in kind:
         return (88, "Fact-Checking", 2)
     if "major news" in kind:
         return (82, "Major News", 2)
-    return (65, "General Web", 3)
+    return (68, "General Web", 3)
 
 
 def _canonical_url(value: str) -> str:
@@ -153,7 +149,7 @@ async def _google_news(query: str, max_results: int) -> list[dict]:
         async with httpx.AsyncClient(
             timeout=get_settings().search_timeout,
             follow_redirects=True,
-            headers={"User-Agent": "Factygo/1.1"},
+            headers={"User-Agent": "Factygo/2.0"},
         ) as client:
             r = await client.get(url)
             r.raise_for_status()
@@ -187,7 +183,7 @@ async def _pubmed_fallback(query: str, max_results: int = 3) -> list[dict]:
     if not keywords:
         return []
     try:
-        async with httpx.AsyncClient(timeout=get_settings().search_timeout, headers={"User-Agent": "Factygo/1.1"}) as client:
+        async with httpx.AsyncClient(timeout=get_settings().search_timeout, headers={"User-Agent": "Factygo/2.0"}) as client:
             sr = await client.get(
                 "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
                 params={"db": "pubmed", "term": keywords, "retmode": "json", "retmax": max_results},
@@ -224,7 +220,7 @@ async def _pubmed_fallback(query: str, max_results: int = 3) -> list[dict]:
 async def _wikipedia_fallback(query: str, max_results: int = 3) -> list[dict]:
     keywords = " ".join(list(_terms(query))[:6]) or query[:100]
     try:
-        async with httpx.AsyncClient(timeout=get_settings().search_timeout, headers={"User-Agent": "Factygo/1.1"}) as client:
+        async with httpx.AsyncClient(timeout=get_settings().search_timeout, headers={"User-Agent": "Factygo/2.0"}) as client:
             r = await client.get(
                 "https://en.wikipedia.org/w/api.php",
                 params={"action": "query", "list": "search", "srsearch": keywords, "format": "json", "srlimit": max_results},
@@ -311,7 +307,10 @@ async def search_web(query: str, max_results: int | None = None, resource_plan: 
     ddgs_task = asyncio.gather(*[_ddgs(q, min(max_results, 8)) for q in provider_queries[:2]], return_exceptions=True)
     news_task = asyncio.gather(*[_google_news(q, min(max_results, 8)) for q in provider_queries[:2]], return_exceptions=True)
     pubmed_task = _pubmed_fallback(base_q, max_results=3)
-    ddgs_batches, news_batches, pubmed_results = await asyncio.gather(ddgs_task, news_task, pubmed_task)
+    wiki_task = _wikipedia_fallback(base_q, max_results=3)
+    ddgs_batches, news_batches, pubmed_results, wiki_results = await asyncio.gather(
+        ddgs_task, news_task, pubmed_task, wiki_task
+    )
 
     combined = []
     for batch in list(ddgs_batches) + list(news_batches):
@@ -319,8 +318,8 @@ async def search_web(query: str, max_results: int | None = None, resource_plan: 
             combined.extend(batch)
     if isinstance(pubmed_results, list):
         combined.extend(pubmed_results)
-    if len(combined) < 3:
-        combined.extend(await _wikipedia_fallback(base_q, max_results=3))
+    if isinstance(wiki_results, list):
+        combined.extend(wiki_results)
 
     results = _normalise(combined)
     for item in results:
@@ -349,8 +348,6 @@ async def search_web(query: str, max_results: int | None = None, resource_plan: 
 
 
 class ResearchService:
-    """Compatibility wrapper matching FactyGo's original ResearchService interface."""
-
     def search(self, query: str) -> list[dict]:
         return asyncio.run(search_web(query))
 

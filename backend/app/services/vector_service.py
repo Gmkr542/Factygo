@@ -1,6 +1,4 @@
 class VectorService:
-    """RAG/vector-search extension point."""
-
     def index(self, documents: list[dict]) -> None:
         return None
 

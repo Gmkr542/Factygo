@@ -15,7 +15,6 @@ async def run_investigation(req: InvestigateRequest):
     if not raw_input:
         raise HTTPException(status_code=400, detail="Please provide a claim, question, or URL to investigate.")
 
-    # Support direct URL investigation seamlessly if user enters an http(s) link
     if raw_input.startswith(("http://", "https://")) and " " not in raw_input:
         try:
             title, body = await fetch_article(raw_input)

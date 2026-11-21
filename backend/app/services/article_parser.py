@@ -1,6 +1,5 @@
 import ipaddress
 import socket
-import urllib.robotparser
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -15,7 +14,6 @@ class ArticleFetchError(Exception):
 
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 MAX_REDIRECTS = 5
-MAX_ROBOTS_BYTES = 512 * 1024
 
 
 def _safe_host(host: str) -> bool:
@@ -66,12 +64,13 @@ async def _request_limited(url: str, ua: str, timeout: float, max_bytes: int):
     raise ArticleFetchError("Redirect limit reached")
 
 
-async def fetch_article(url: str) -> tuple[str, str]:
+async def fetch_article(url: str, timeout_override: float | None = None) -> tuple[str, str]:
     if not _public_http_url(url):
         raise ArticleFetchError("Invalid or non-public URL")
     settings = get_settings()
-    ua = "Factygo/1.1"
-    status, headers, body, final_url = await _request_limited(url, ua, settings.request_timeout, settings.max_article_chars * 20)
+    ua = "Factygo/2.0"
+    timeout = timeout_override or settings.request_timeout
+    status, headers, body, final_url = await _request_limited(url, ua, timeout, settings.max_article_chars * 10)
     if status >= 400 or not _public_http_url(final_url):
         raise ArticleFetchError("Unable to retrieve article")
     if "text/html" not in headers.get("content-type", "").lower():

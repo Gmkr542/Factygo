@@ -32,6 +32,8 @@ class ResearchQuestion(BaseModel):
 class InvestigationResponse(BaseModel):
     claim: str
     claims: list[Claim] = Field(default_factory=list)
+    claim_verdicts: list[dict[str, Any]] = Field(default_factory=list)
+    computed_facts: list[str] = Field(default_factory=list)
     verdict: str = "UNVERIFIED"
     confidence: int = 0
     explanation: str = ""

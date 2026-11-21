@@ -4,8 +4,6 @@ from urllib.parse import urlparse
 
 
 class VerdictService:
-    """Deterministic fallback verdict engine when LLM synthesis is unavailable or rate-limited."""
-
     def evaluate(self, claim: str, evidence: list[dict]) -> dict:
         if not evidence:
             return {
@@ -23,9 +21,9 @@ class VerdictService:
         supporting = [e for e in evidence if e.get("stance") == "supporting"]
         contradicting = [e for e in evidence if e.get("stance") == "contradicting"]
         domains = {
-            urlparse(e.get("source_url", "")).netloc.lower().removeprefix("www.")
+            (e.get("domain") or urlparse(e.get("source_url", "")).netloc).lower().removeprefix("www.")
             for e in evidence
-            if e.get("source_url")
+            if e.get("domain") or e.get("source_url")
         }
         domains.discard("")
 
@@ -39,11 +37,11 @@ class VerdictService:
         elif con_weight > 0 and sup_weight == 0:
             verdict = "MOSTLY FALSE" if len(contradicting) >= 2 else "MISLEADING"
             confidence = min(85, int(45 + con_weight * 15))
-            explanation = f"Retrieved evidence from {len(domains)} independent domain(s) contradicts or finds insufficient basis for the claim."
+            explanation = f"Retrieved evidence from {len(domains)} independent domain(s) contradicts the claim."
         elif sup_weight > 0 and con_weight > 0:
             verdict = "PARTLY TRUE"
             confidence = min(75, int(40 + abs(sup_weight - con_weight) * 10))
-            explanation = "Retrieved sources show mixed or nuanced findings; supporting evidence is tempered by caveats or contradicting studies."
+            explanation = "Retrieved sources show mixed findings with both supporting evidence and caveats."
         else:
             verdict = "UNVERIFIED"
             confidence = min(45, 15 + len(evidence) * 5)

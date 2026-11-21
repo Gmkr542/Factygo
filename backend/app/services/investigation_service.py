@@ -8,10 +8,12 @@ from urllib.parse import urlparse
 
 from app.core.config import get_settings
 from app.schemas.investigation import InvestigationResponse, ResearchQuestion
+from app.services.article_parser import fetch_article
 from app.services.claim_intelligence import ClaimIntelligence
 from app.services.claim_service import decompose_claim
 from app.services.evidence_service import EvidenceService
 from app.services.groq_service import synthesize_investigation
+from app.services.logic_service import LogicService
 from app.services.question_service import QuestionService
 from app.services.search_service import ResearchService, search_web
 from app.services.verdict_service import VerdictService
@@ -19,15 +21,16 @@ from app.services.verdict_service import VerdictService
 logger = logging.getLogger(__name__)
 
 _INVESTIGATION_CACHE: dict[str, tuple[float, InvestigationResponse]] = {}
-_CACHE_TTL_SECONDS = 3600  # 1 hour cache so repeat/demo clicks use 0 Groq tokens
+_CACHE_TTL_SECONDS = 3600
 
 _DOMAIN_BY_CATEGORY = {
     "health": ["pubmed.ncbi.nlm.nih.gov", "who.int", "nih.gov"],
     "health_science": ["pubmed.ncbi.nlm.nih.gov", "who.int", "nih.gov"],
     "medical": ["pubmed.ncbi.nlm.nih.gov", "who.int", "nih.gov"],
+    "settled_science": ["en.wikipedia.org", "nasa.gov", "nature.com"],
     "science": ["nature.com", "pubmed.ncbi.nlm.nih.gov", "arxiv.org"],
     "finance": ["imf.org", "worldbank.org", "sec.gov"],
-    "economics_finance": ["imf.org", "worldbank.org", "sec.gov"],
+    "economics_demographics": ["un.org", "pewresearch.org", "worldbank.org"],
     "politics": ["reuters.com", "apnews.com", "bbc.com"],
 }
 
@@ -88,6 +91,32 @@ def _deterministic_resource_plan(claim_analysis: dict) -> dict:
     return {"preferred_domains": domains} if domains else {}
 
 
+async def _enrich_top_articles(documents: list[dict], claim: str) -> None:
+    """Upgrade #2: Deep-read the top 2 non-redirect HTML sources for full context & caveats."""
+    targets = [
+        doc for doc in documents[:3]
+        if doc.get("url", "").startswith(("http://", "https://"))
+        and "news.google.com/rss/" not in doc.get("url", "")
+    ][:2]
+    if not targets:
+        return
+
+    async def _fetch_one(doc: dict) -> None:
+        try:
+            _title, full_text = await asyncio.wait_for(
+                fetch_article(doc["url"], timeout_override=5.0),
+                timeout=6.0,
+            )
+            if full_text and len(full_text) > len(doc.get("content", "")):
+                doc["content"] = full_text[:2800]
+                doc["text"] = full_text[:2800]
+                doc["full_article_read"] = True
+        except Exception:
+            pass
+
+    await asyncio.gather(*[_fetch_one(d) for d in targets], return_exceptions=True)
+
+
 async def investigate_async(text: str) -> InvestigationResponse:
     cache_key = " ".join(text.strip().lower().split())
     now = time.monotonic()
@@ -99,12 +128,13 @@ async def investigate_async(text: str) -> InvestigationResponse:
     claim_analysis = ClaimIntelligence.analyze(text)
     use_ai = bool(settings.groq_api_key and settings.groq_api_key.strip())
 
-    # 1. Zero-token deterministic claim decomposition, question framing & domain routing
+    # 1. Deterministic atomic claim decomposition, question framing & hybrid routing
     claims = decompose_claim(text)
+    subclaim_texts = [c.text for c in claims]
     questions = QuestionService.frame(text, claim_analysis)[:2]
     resource_plan = _deterministic_resource_plan(claim_analysis)
 
-    # 2. Concurrent multi-provider web search (top 5 high-authority sources)
+    # 2. Concurrent multi-provider web search (DDGS + Google News RSS + PubMed + Wikipedia)
     search_tasks = [search_web(q, max_results=5, resource_plan=resource_plan) for q in questions]
     batch_results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
@@ -135,11 +165,22 @@ async def investigate_async(text: str) -> InvestigationResponse:
     for i, doc in enumerate(documents, start=1):
         doc["evidence_id"] = f"E{i:02d}"
 
-    # 3. Single-call Groq synthesis (saves ~85% daily token quota) with deterministic fallback
+    # 3. Full-Article Deep Reading (top 2 URLs) + Symbolic Math/Date Logic Verification
+    await _enrich_top_articles(documents, text)
+    computed_facts = LogicService.analyze(text, documents)
+
+    # 4. Single-call Groq synthesis with deterministic fallback
     llm_synthesis: dict = {}
     if use_ai and documents:
         try:
-            llm_synthesis = await synthesize_investigation(text, questions, documents)
+            llm_synthesis = await synthesize_investigation(
+                text,
+                subclaims=subclaim_texts,
+                questions=questions,
+                evidence_pool=documents,
+                computed_facts=computed_facts,
+                knowledge_mode=claim_analysis.get("knowledge_mode", "strict_closed_book"),
+            )
         except Exception as exc:
             logger.warning("LLM synthesis failed, falling back to deterministic verdict: %s", exc)
 
@@ -150,12 +191,12 @@ async def investigate_async(text: str) -> InvestigationResponse:
         llm_assessments=llm_synthesis.get("evidence_assessments"),
     )
 
-    # Propagate resolved publisher domains into evidence items
     doc_domain_by_url = {d.get("url"): d.get("domain", "") for d in documents if d.get("url")}
     for ev in evidence:
         if not ev.get("domain") and ev.get("source_url"):
             ev["domain"] = doc_domain_by_url.get(ev["source_url"], "")
 
+    claim_verdicts: list[dict] = []
     if llm_synthesis and llm_synthesis.get("verdict"):
         verdict_label = str(llm_synthesis["verdict"]).upper()
         try:
@@ -165,6 +206,17 @@ async def investigate_async(text: str) -> InvestigationResponse:
         explanation = _format_quick_report(verdict_label, text, str(llm_synthesis.get("explanation") or ""))
         raw_analysis = llm_synthesis.get("analysis") if isinstance(llm_synthesis.get("analysis"), dict) else {}
         evidence_analysis = _compute_analysis(evidence, raw_analysis)
+        raw_cv = llm_synthesis.get("claim_verdicts")
+        if isinstance(raw_cv, list):
+            claim_verdicts = [
+                {
+                    "subclaim": str(x.get("subclaim", "")).strip(),
+                    "verdict": str(x.get("verdict", "UNVERIFIED")).upper(),
+                    "evidence_id": str(x.get("evidence_id", "")).strip(),
+                }
+                for x in raw_cv
+                if isinstance(x, dict) and str(x.get("subclaim", "")).strip()
+            ][:4]
     else:
         verdict_data = VerdictService().evaluate(text, evidence)
         verdict_label = verdict_data["verdict"]
@@ -196,6 +248,8 @@ async def investigate_async(text: str) -> InvestigationResponse:
     response = InvestigationResponse(
         claim=text,
         claims=claims,
+        claim_verdicts=claim_verdicts,
+        computed_facts=computed_facts,
         verdict=verdict_label,
         confidence=confidence,
         explanation=explanation,
@@ -203,9 +257,11 @@ async def investigate_async(text: str) -> InvestigationResponse:
         sources=researcher.normalize(documents),
         status="complete" if documents else "no_results",
         methodology=[
-            "Deterministic atomic claim decomposition & domain routing",
-            "Top-5 authoritative source retrieval (PubMed, Google News RSS, Wikipedia, DDGS)",
-            "Single-pass closed-book AI synthesis with TTL response caching",
+            "Atomic claim decomposition & hybrid knowledge-mode routing",
+            "Concurrent multi-provider retrieval (PubMed, Wikipedia, Google News RSS, DDGS)",
+            "SSRF-safe full-article deep reading for top authoritative sources",
+            "Deterministic symbolic math & temporal logic verification",
+            "Evidence-grounded AI synthesis with TTL caching",
         ],
         claim_analysis=claim_analysis,
         evidence_analysis=evidence_analysis,
