@@ -311,8 +311,8 @@ className={tab === id ? "active" : ""}
 onClick={() => setTab(id)}
 >
 {name}
-{id === "evidence" && {evidence.length}}
-{id === "sources" && {sources.length}}
+{id === "evidence" ? " (" + evidence.length + ")" : ""}
+{id === "sources" ? " (" + sources.length + ")" : ""}
 
 ))}
 {tab === "verdict" && (
