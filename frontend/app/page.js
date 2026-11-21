@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -64,8 +63,8 @@ function splitReport(explanation) {
   const sentences = raw.split(/(?<=[.!?])\s+/).filter(Boolean);
   if (sentences.length >= 2) {
     return {
-      summary: sentences,
-      breakdown: `Breakdown: ${sentences.slice(1).join(" ")}`,
+      summary: sentences[0],
+      breakdown: "Breakdown: " + sentences.slice(1).join(" "),
     };
   }
   return {
@@ -106,7 +105,9 @@ export default function Home() {
     const q = text.trim().toLowerCase();
     if (!q) return shuffledPrompts;
     const matches = shuffledPrompts.filter(item => item.text.toLowerCase().includes(q));
-    return matches.length >= 3 ? matches : [...matches, ...shuffledPrompts.filter(item => !item.text.toLowerCase().includes(q))];
+    return matches.length >= 3
+      ? matches
+      : [...matches, ...shuffledPrompts.filter(item => !item.text.toLowerCase().includes(q))];
   }, [text, shuffledPrompts]);
 
   async function investigate(overrideText) {
@@ -123,7 +124,7 @@ export default function Home() {
       const timer = setTimeout(() => controller.abort(), 45000);
       let response;
       try {
-        response = await fetch(`${API}/api/investigate`, {
+        response = await fetch(API + "/api/investigate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: claim }),
@@ -136,7 +137,12 @@ export default function Home() {
       if (!response.ok) throw new Error(data.detail || "Investigation failed.");
       setResult(data);
     } catch (error) {
-      setResult({ error: error.name === "AbortError" ? "Research timed out. The web search provider may be unavailable right now." : (error.message || "Could not connect to Factygo API.") });
+      setResult({
+        error:
+          error.name === "AbortError"
+            ? "Research timed out. The web search provider may be unavailable right now."
+            : error.message || "Could not connect to Factygo API.",
+      });
     } finally {
       setLoading(false);
     }
@@ -232,7 +238,7 @@ export default function Home() {
                 {filteredSuggestions.map((item, idx) => (
                   <button
                     type="button"
-                    key={`${item.text}-${idx}`}
+                    key={item.text + "-" + idx}
                     className="suggestionItem"
                     onClick={() => {
                       setText(item.text);
@@ -280,7 +286,8 @@ export default function Home() {
         <section className="investigationCard">
           <div className="resultHero">
             <div className="verdictBlock">
-<div className={verdictBadge ${verdictTone(result.verdict)}}>
+Use code with caution.
+<div className={"verdictBadge " + verdictTone(result.verdict)}>
 
 {label(result.verdict)}
 
@@ -291,8 +298,8 @@ export default function Home() {
 {domains} independent {domains === 1 ? "domain" : "domains"}
 
 
-<div className={confidenceMeter ${confidenceTone(confidence)}}>
-<div className="confidenceRing" style={{ "--confidence": ${confidence}% }}>
+<div className={"confidenceMeter " + confidenceTone(confidence)}>
+<div className="confidenceRing" style={{ "--confidence": confidence + "%" }}>
 {confidence}%
 
 CONFIDENCE
@@ -333,7 +340,17 @@ SOURCES{sources.length}
 
 
 i
-Evidence overview{supporting.length ? ${supporting.length} supporting item${supporting.length === 1 ? "" : "s"} found. : "No direct supporting evidence found."} {contradicting.length ? ${contradicting.length} contradiction${contradicting.length === 1 ? "" : "s"} detected. : "No direct contradiction detected."}
+
+Evidence overview
+
+{supporting.length
+? supporting.length + " supporting item" + (supporting.length === 1 ? "" : "s") + " found."
+: "No direct supporting evidence found."}{" "}
+{contradicting.length
+? contradicting.length + " contradiction" + (contradicting.length === 1 ? "" : "s") + " detected."
+: "No direct contradiction detected."}
+
+
 
 </>
 )}
@@ -350,7 +367,7 @@ WEB RESEARCHEvidence
 {evidence.map((e, i) => (
 <article className="evidenceCard" key={e.id || i}>
 
-<span className={stance ${String(e.stance).toLowerCase()}}>{label(e.stance)}
+<span className={"stance " + String(e.stance).toLowerCase()}>{label(e.stance)}
 
 {e.relevance != null && Relevance {e.relevance}%}
 {e.strength != null && Strength {e.strength}%}
