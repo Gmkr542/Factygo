@@ -162,11 +162,12 @@ def get_quota_status() -> dict:
     t_used_pct = max(0, min(100, 100 - int(tpd_pct))) if s.groq_api_key else 100
     r_used_pct = max(0, min(100, 100 - int(rpd_pct))) if s.groq_api_key else 100
 
-    # Active remaining reset timer:
-    # - Uses live rate-limit header countdown (seconds/minutes) when active (> 0)
-    # - Falls back to remaining daily reset countdown (hours/minutes until 00:00 UTC) whenever quota > 0% is used
-    tok_rem_sec = int(round(hdr_tok_rem)) if hdr_tok_rem > 0 else (daily_reset_sec if t_used_pct > 0 else 0)
-    req_rem_sec = int(round(hdr_req_rem)) if hdr_req_rem > 0 else (daily_reset_sec if r_used_pct > 0 else 0)
+    # Keep each bucket on its own real reset clock:
+    # - Daily Tokens (T) and Daily Requests (R) reset at 00:00 UTC (`daily_reset_sec`).
+    # - Per-Minute Speed (TPM) resets on Groq's per-minute token header (`hdr_tok_rem`).
+    tok_rem_sec = daily_reset_sec if t_used_pct > 0 else 0
+    req_rem_sec = daily_reset_sec if r_used_pct > 0 else 0
+    tpm_rem_sec = int(round(hdr_tok_rem)) if (tpm_pct < 100 and hdr_tok_rem > 0) else 0
 
     def _fmt_rem(sec: int) -> str:
         if sec <= 0:
@@ -207,6 +208,7 @@ def get_quota_status() -> dict:
         "utc_date": _utc_today(),
         "token_reset_seconds": tok_rem_sec,
         "request_reset_seconds": req_rem_sec,
+        "tpm_reset_seconds": tpm_rem_sec,
         "daily_reset_seconds": daily_reset_sec,
         "token_reset_label": t_reset_label,
         "request_reset_label": r_reset_label,

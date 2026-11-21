@@ -482,14 +482,14 @@ export default function Home() {
           void _tickRef;
           const elapsedLocalSec = Math.max(0, Math.floor((Date.now() - quotaFetchedAtRef.current) / 1000));
           const liveDailySec = Math.max(0, Number(quota.daily_reset_seconds ?? 0) - elapsedLocalSec);
-          const rawTokenSec = Math.max(0, Number(quota.token_reset_seconds ?? 0) - elapsedLocalSec);
-          const rawRequestSec = Math.max(0, Number(quota.request_reset_seconds ?? 0) - elapsedLocalSec);
+          const liveTpmSec = Math.max(0, Number(quota.tpm_reset_seconds ?? 0) - elapsedLocalSec);
 
-          const liveTokenSec = tUsed > 0 ? (rawTokenSec > 0 ? rawTokenSec : liveDailySec) : 0;
-          const liveRequestSec = rUsed > 0 ? (rawRequestSec > 0 ? rawRequestSec : liveDailySec) : 0;
+          const liveTokenSec = tUsed > 0 ? liveDailySec : 0;
+          const liveRequestSec = rUsed > 0 ? liveDailySec : 0;
 
           const tRem = formatRemaining(liveTokenSec);
           const rRem = formatRemaining(liveRequestSec);
+          const tpmRem = formatRemaining(liveTpmSec);
 
           const resetParts = [];
           if (tUsed > 0 && tRem) {
@@ -505,6 +505,10 @@ export default function Home() {
           const rHoverParts = [`${rPct}% left`];
           if (rUsed > 0 && rRem) rHoverParts.push(`reset timer: ${rRem}`);
 
+          const tpmPct = quota.tpm_available_pct ?? 100;
+          const tpmHoverParts = [`${tpmPct}% left`];
+          if (tpmPct < 100 && tpmRem) tpmHoverParts.push(`reset timer: ${tpmRem}`);
+
           return (
             <div
               className={
@@ -515,7 +519,7 @@ export default function Home() {
                 `Model: ${quota.model} (${quota.utc_date} UTC)\n` +
                 `• Tokens (T): ${quota.remaining_tokens_tpd?.toLocaleString()} / ${quota.limit_tokens_tpd?.toLocaleString()} (${tHoverParts.join(" · ")})\n` +
                 `• Requests (R): ${quota.remaining_requests_rpd?.toLocaleString()} / ${quota.limit_requests_rpd?.toLocaleString()} (${rHoverParts.join(" · ")})\n` +
-                `• Per-Minute Speed (TPM): ${quota.tpm_available_pct}% left`
+                `• Per-Minute Speed (TPM): ${tpmHoverParts.join(" · ")}`
               }
             >
               <div className="quotaMainLine">
