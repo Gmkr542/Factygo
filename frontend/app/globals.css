@@ -518,7 +518,6 @@ textarea::placeholder {
 
 /* Clean Stat Strip */
 .statGrid, .summaryGrid {
-Use code with caution.
 display: grid;
 grid-template-columns: repeat(4, 1fr);
 gap: 10px;
