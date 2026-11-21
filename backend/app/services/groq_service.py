@@ -112,13 +112,16 @@ def get_quota_status() -> dict:
 
     tokens_used_today, requests_used_today = _get_daily_usage()
 
-    # Groq's x-ratelimit-remaining-requests / limit-requests reflects RPD (Requests Per Day)
+    # Track daily requests persistently via SQLite `requests_used_today`, combining with Groq's
+    # `remaining_requests_rpd` header when present so RPD accurately reflects used requests today.
     lim_rpd = _QUOTA_STATE["limit_requests_rpd"] or default_rpd
-    rem_rpd = (
-        _QUOTA_STATE["remaining_requests_rpd"]
-        if _QUOTA_STATE["remaining_requests_rpd"] is not None
-        else max(0, lim_rpd - requests_used_today)
-    )
+    db_rem_rpd = max(0, lim_rpd - requests_used_today)
+    if _QUOTA_STATE["remaining_requests_rpd"] is not None and requests_used_today > 0:
+        rem_rpd = max(0, min(int(_QUOTA_STATE["remaining_requests_rpd"]), db_rem_rpd))
+    elif _QUOTA_STATE["remaining_requests_rpd"] is not None:
+        rem_rpd = max(0, int(_QUOTA_STATE["remaining_requests_rpd"]))
+    else:
+        rem_rpd = db_rem_rpd
     rpd_pct = round((rem_rpd / lim_rpd) * 100) if lim_rpd > 0 else 100
 
     # Daily Token Budget (TPD) tracked persistently in SQLite
