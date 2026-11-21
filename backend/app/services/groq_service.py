@@ -115,11 +115,16 @@ def get_quota_status() -> dict:
     # Track daily requests persistently via SQLite `requests_used_today`, combining with Groq's
     # `remaining_requests_rpd` header when present so RPD accurately reflects used requests today.
     lim_rpd = _QUOTA_STATE["limit_requests_rpd"] or default_rpd
-    db_rem_rpd = max(0, lim_rpd - requests_used_today)
-    if _QUOTA_STATE["remaining_requests_rpd"] is not None and requests_used_today > 0:
-        rem_rpd = max(0, min(int(_QUOTA_STATE["remaining_requests_rpd"]), db_rem_rpd))
-    elif _QUOTA_STATE["remaining_requests_rpd"] is not None:
-        rem_rpd = max(0, int(_QUOTA_STATE["remaining_requests_rpd"]))
+    effective_reqs_used = requests_used_today
+    if effective_reqs_used <= 0 and tokens_used_today > 0:
+        effective_reqs_used = max(1, int(round(tokens_used_today / 1200)))
+    db_rem_rpd = max(0, lim_rpd - effective_reqs_used)
+    if _QUOTA_STATE["remaining_requests_rpd"] is not None:
+        hdr_rem_rpd = max(0, int(_QUOTA_STATE["remaining_requests_rpd"]))
+        if effective_reqs_used > 0:
+            rem_rpd = max(0, min(hdr_rem_rpd, db_rem_rpd))
+        else:
+            rem_rpd = min(lim_rpd, hdr_rem_rpd)
     else:
         rem_rpd = db_rem_rpd
     rpd_pct = round((rem_rpd / lim_rpd) * 100) if lim_rpd > 0 else 100
