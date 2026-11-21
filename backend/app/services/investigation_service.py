@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from urllib.parse import urlparse
 
 from app.core.config import get_settings
@@ -26,11 +27,37 @@ def _raw_answer(question: str, documents: list[dict]) -> str:
     if not documents:
         return "No source page was retrieved for this research question."
     top = documents[0]
-    snippet = str(top.get("content") or top.get("text") or "").strip()[:500]
+    snippet = str(top.get("content") or top.get("text") or "").strip()[:320]
     domain = urlparse(top.get("url", "")).netloc.removeprefix("www.")
     if not snippet:
         snippet = top.get("title", "Relevant source found.")
-    return f"{snippet} (Source: {top.get('title', 'Retrieved source')} — {domain})"
+    return f"{snippet} ({top.get('title', 'Source')} — {domain})"
+
+
+def _condense_explanation(text: str, max_sentences: int = 2) -> str:
+    cleaned = " ".join(str(text or "").split()).strip()
+    if not cleaned:
+        return ""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", cleaned) if s.strip()]
+    if len(sentences) <= max_sentences:
+        return cleaned
+    return " ".join(sentences[:max_sentences])
+
+
+def _compute_analysis(evidence: list[dict], base_analysis: dict | None = None) -> dict:
+    analysis = dict(base_analysis or {})
+    supporting = [e for e in evidence if str(e.get("stance", "")).lower() == "supporting"]
+    contradicting = [e for e in evidence if str(e.get("stance", "")).lower() == "contradicting"]
+    domains = {
+        urlparse(str(e.get("source_url", ""))).netloc.lower().removeprefix("www.")
+        for e in evidence
+        if e.get("source_url")
+    }
+    domains.discard("")
+    analysis["supporting_count"] = len(supporting)
+    analysis["contradicting_count"] = len(contradicting)
+    analysis["independent_domains"] = len(domains)
+    return analysis
 
 
 async def investigate_async(text: str) -> InvestigationResponse:
@@ -70,7 +97,7 @@ async def investigate_async(text: str) -> InvestigationResponse:
         except Exception as exc:
             logger.warning("LLM resource planning failed: %s", exc)
 
-    # 4. Concurrent multi-provider web search (DDGS + Google News RSS)
+    # 4. Concurrent multi-provider web search
     search_tasks = [search_web(q, resource_plan=resource_plan) for q in questions]
     batch_results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
@@ -93,7 +120,6 @@ async def investigate_async(text: str) -> InvestigationResponse:
                 enriched["research_question"] = question
                 documents.append(enriched)
 
-    # Sort combined pool by relevance & source quality and assign stable E01..E15 IDs
     documents.sort(
         key=lambda x: (x.get("relevance_score", 0), x.get("source_quality", 0)),
         reverse=True,
@@ -123,16 +149,17 @@ async def investigate_async(text: str) -> InvestigationResponse:
             confidence = max(0, min(100, int(round(float(llm_synthesis.get("confidence", 0))))))
         except (TypeError, ValueError):
             confidence = 50
-        explanation = str(llm_synthesis.get("explanation") or "").strip()
-        evidence_analysis = llm_synthesis.get("analysis") if isinstance(llm_synthesis.get("analysis"), dict) else {}
+        raw_explanation = str(llm_synthesis.get("explanation") or "").strip()
+        explanation = _condense_explanation(raw_explanation, max_sentences=2)
+        raw_analysis = llm_synthesis.get("analysis") if isinstance(llm_synthesis.get("analysis"), dict) else {}
+        evidence_analysis = _compute_analysis(evidence, raw_analysis)
     else:
         verdict_data = VerdictService().evaluate(text, evidence)
         verdict_label = verdict_data["verdict"]
         confidence = verdict_data["confidence"]
-        explanation = verdict_data["explanation"]
-        evidence_analysis = verdict_data["analysis"]
+        explanation = _condense_explanation(verdict_data["explanation"], max_sentences=2)
+        evidence_analysis = _compute_analysis(evidence, verdict_data["analysis"])
 
-    # Map LLM question answers if available
     ai_q_answers = {
         str(item.get("question", "")).strip().lower(): str(item.get("answer", "")).strip()
         for item in llm_synthesis.get("question_answers", [])
@@ -166,7 +193,7 @@ async def investigate_async(text: str) -> InvestigationResponse:
         methodology=[
             "Claim normalization and atomic decomposition",
             "Context-aware research question framing & resource planning",
-            "Concurrent multi-provider live web search (DDGS + Google News RSS)",
+            "Concurrent multi-provider live web search (DDGS, Google News RSS, PubMed, Wikipedia)",
             "Source authority classification and URL deduplication",
             "Evidence-grounded AI synthesis with deterministic fallback",
         ],
