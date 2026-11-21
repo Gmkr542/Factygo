@@ -504,7 +504,7 @@ export default function Home() {
       <header className="hero">
         <div className="eyebrow">AI RESEARCH &amp; AUDIT WORKSPACE</div>
         <h1>Investigate claims.<br /><span>Audit AI outputs.</span></h1>
-        <p className="heroSubtitleClean">Verify claims against live primary sources, check math &amp; timelines, and audit AI citations.</p>
+        {!loading && <p className="heroSubtitleClean">Verify claims against live primary sources, check math &amp; timelines, and audit AI citations.</p>}
       </header>
 
       {quota?.rpd_limit_reached && (
@@ -558,7 +558,7 @@ export default function Home() {
                 ? "Paste a ChatGPT/Gemini paragraph with DOIs, PMIDs, arXiv IDs, or URLs to audit..."
                 : "Prompt your claims"
             }
-            rows={2}
+            rows={1}
             disabled={loading}
           />
           {showSuggestions && !loading && (
@@ -587,7 +587,7 @@ export default function Home() {
           )}
         </div>
         <div className="searchFooter">
-          <span className="hint">Ctrl/Cmd + Enter to run · Auto-detects DOIs, PMIDs, arXiv & URLs</span>
+          {!loading && <span className="hint">Ctrl/Cmd + Enter to run · Auto-detects DOIs, PMIDs, arXiv &amp; URLs</span>}
           <button className="primaryButton" onClick={() => investigate()} disabled={loading || !text.trim()}>
             {loading ? <><span className="spinner" /> Investigating…</> : <>{mode === "audit_ai" ? "Audit Citations" : "Investigate"} <span>→</span></>}
           </button>

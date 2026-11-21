@@ -1196,3 +1196,30 @@ a.unifiedSourceCard:hover .unifiedCardTitle { color: var(--accent); }
     font-size: 21px;
   }
 }
+
+
+.searchCard {
+  padding: 12px 16px;
+}
+
+.searchLabelRow {
+  margin-bottom: 6px;
+}
+
+textarea {
+  min-height: 34px;
+  max-height: 110px;
+  padding: 2px 2px 0;
+  font-size: 15.5px;
+  line-height: 1.4;
+}
+
+.searchFooter {
+  margin-top: 2px;
+  padding-top: 8px;
+}
+
+.appShell.workspaceActive .searchCard {
+  margin-bottom: 14px;
+  padding: 11px 16px;
+}
