@@ -95,17 +95,23 @@ def get_quota_status() -> dict:
         sec_in_min = now_utc.second + (now_utc.microsecond / 1_000_000.0)
         tpm_pct = max(0, min(100, round(100.0 - (sec_in_min / 60.0) * 15.0)))
 
-    # Daily Requests (RPD) from live Groq request headers + live request activity
+    # Daily Requests (RPD) from live request activity & Groq request headers:
+    # Ensure any recorded requests or token activity in this process advances RPD consumption
+    # consistently alongside TPD rather than leaving RPD at 1,000 / 1,000 when requests ran.
     lim_rpd = int(_QUOTA_STATE.get("limit_requests_rpd") or default_rpd)
+    effective_reqs_used = max(0, int(requests_used_today))
+    if effective_reqs_used <= 0 and tokens_used_today > 0:
+        effective_reqs_used = max(1, int(round(tokens_used_today / 1200)))
     if not s.groq_api_key:
         rpd_pct = 0
         rem_rpd = 0
-    elif _QUOTA_STATE.get("remaining_requests_rpd") is not None:
-        hdr_rem_rpd = max(0, min(lim_rpd, int(_QUOTA_STATE["remaining_requests_rpd"])))
-        rem_rpd = max(0, min(hdr_rem_rpd, lim_rpd - requests_used_today))
-        rpd_pct = max(0, min(100, round((rem_rpd / lim_rpd) * 100))) if lim_rpd > 0 else 100
     else:
-        rem_rpd = max(0, lim_rpd - requests_used_today)
+        used_rpd = effective_reqs_used
+        if _QUOTA_STATE.get("remaining_requests_rpd") is not None:
+            hdr_rem_rpd = max(0, min(lim_rpd, int(_QUOTA_STATE["remaining_requests_rpd"])))
+            hdr_used_rpd = max(0, lim_rpd - hdr_rem_rpd)
+            used_rpd = max(used_rpd, hdr_used_rpd)
+        rem_rpd = max(0, lim_rpd - used_rpd)
         rpd_pct = max(0, min(100, round((rem_rpd / lim_rpd) * 100))) if lim_rpd > 0 else 100
 
     # Daily Tokens (TPD) from live token usage & Groq token headers across UTC day
