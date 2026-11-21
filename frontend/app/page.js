@@ -479,7 +479,7 @@ export default function Home() {
       )}
 
       <header className="hero compactHero">
-        <div className="eyebrow">AI RESEARCH &amp; AUDIT WORKSPACE.</div>
+        <h1 className="heroTitleBlack">AI RESEARCH &amp; AUDIT WORKSPACE</h1>
         <p className="heroSubCompact">Verify claims against live primary sources, check symbolic math &amp; timelines, or catch hallucinated DOIs and links in AI-generated text.</p>
       </header>
 
