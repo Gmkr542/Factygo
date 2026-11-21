@@ -444,9 +444,9 @@ export default function Home() {
           const tUsed = quota.tpd_used_pct ?? Math.max(0, Math.min(100, 100 - tPct));
           const rUsed = quota.rpd_used_pct ?? Math.max(0, Math.min(100, 100 - rPct));
 
-          const formatMinuteWindow = (secValue, fallbackLabel) => {
-            if (fallbackLabel) return fallbackLabel;
-            const s = Math.max(1, Number(secValue || 60));
+          const formatRemaining = (secValue, fallbackLabel) => {
+            const s = Number(secValue ?? 0);
+            if (s <= 0) return null;
             if (s < 60) return `${s} ${s === 1 ? "second" : "seconds"}`;
             const m = s / 60;
             if (m < 60) {
@@ -458,12 +458,19 @@ export default function Home() {
             return `${hNum} ${hNum === 1 ? "hour" : "hours"}`;
           };
 
-          const tWin = formatMinuteWindow(quota.token_reset_seconds, quota.token_reset_label);
-          const rWin = formatMinuteWindow(quota.request_reset_seconds, quota.request_reset_label);
+          const tRem = formatRemaining(quota.token_reset_seconds, quota.token_reset_label);
+          const rRem = formatRemaining(quota.request_reset_seconds, quota.request_reset_label);
 
           const resetParts = [];
-          if (tUsed > 0) resetParts.push(`${tUsed}% in ${tWin}`);
-          if (rUsed > 0) resetParts.push(`${rUsed}% in ${rWin}`);
+          if (tUsed > 0) {
+            resetParts.push(tRem ? `${tUsed}% in ${tRem}` : `${tUsed}% (timer elapsed)`);
+          }
+          if (rUsed > 0) {
+            resetParts.push(rRem ? `${rUsed}% in ${rRem}` : `${rUsed}% (timer elapsed)`);
+          }
+
+          const tHoverStatus = tUsed === 0 ? "100% available" : (tRem ? `resets in ${tRem}` : "no active reset timer");
+          const rHoverStatus = rUsed === 0 ? "100% available" : (rRem ? `resets in ${rRem}` : "no active reset timer");
 
           return (
             <div
@@ -473,8 +480,8 @@ export default function Home() {
               }
               title={
                 `Model: ${quota.model} (${quota.utc_date} UTC)\n` +
-                `• Tokens (T): ${quota.remaining_tokens_tpd?.toLocaleString()} / ${quota.limit_tokens_tpd?.toLocaleString()} (${tPct}% left, ${tUsed}% used · window: ${tWin})\n` +
-                `• Requests (R): ${quota.remaining_requests_rpd?.toLocaleString()} / ${quota.limit_requests_rpd?.toLocaleString()} (${rPct}% left, ${rUsed}% used · window: ${rWin})\n` +
+                `• Tokens (T): ${quota.remaining_tokens_tpd?.toLocaleString()} / ${quota.limit_tokens_tpd?.toLocaleString()} (${tPct}% left, ${tUsed}% used · ${tHoverStatus})\n` +
+                `• Requests (R): ${quota.remaining_requests_rpd?.toLocaleString()} / ${quota.limit_requests_rpd?.toLocaleString()} (${rPct}% left, ${rUsed}% used · ${rHoverStatus})\n` +
                 `• Per-Minute Speed (TPM): ${quota.tpm_available_pct}% available`
               }
             >

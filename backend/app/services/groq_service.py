@@ -149,18 +149,18 @@ def get_quota_status() -> dict:
             alert_message = f"Low Daily Quota Alert: {daily_pct}% remaining ({rem_rpd}/{lim_rpd} requests left today). Repeated queries use cached results (0 quota)."
 
     elapsed_since_hdr = max(0.0, time.monotonic() - float(_QUOTA_STATE.get("updated_at") or 0.0)) if _QUOTA_STATE.get("updated_at") else 0.0
-    raw_tok_sec = max(0.0, float(_QUOTA_STATE.get("reset_tokens_in") or 0.0) - elapsed_since_hdr)
-    raw_req_sec = max(0.0, float(_QUOTA_STATE.get("reset_requests_in") or 0.0) - elapsed_since_hdr)
+    rem_tok_sec = max(0.0, float(_QUOTA_STATE.get("reset_tokens_in") or 0.0) - elapsed_since_hdr)
+    rem_req_sec = max(0.0, float(_QUOTA_STATE.get("reset_requests_in") or 0.0) - elapsed_since_hdr)
 
     t_used_pct = max(0, min(100, 100 - int(tpd_pct))) if s.groq_api_key else 100
     r_used_pct = max(0, min(100, 100 - int(rpd_pct))) if s.groq_api_key else 100
 
-    tok_win_sec = int(round(raw_tok_sec)) if raw_tok_sec > 0 else (60 if (t_used_pct > 0 or (rem_tpm is not None and lim_tpm and rem_tpm < lim_tpm)) else 0)
-    req_win_sec = int(round(raw_req_sec)) if raw_req_sec > 0 else (60 if r_used_pct > 0 else 0)
+    tok_rem_sec = int(round(rem_tok_sec))
+    req_rem_sec = int(round(rem_req_sec))
 
-    def _fmt_win(sec: int) -> str:
+    def _fmt_rem(sec: int) -> str:
         if sec <= 0:
-            return "60 seconds"
+            return "0 seconds"
         if sec < 60:
             return f"{sec} {'second' if sec == 1 else 'seconds'}"
         mins = sec / 60.0
@@ -172,11 +172,11 @@ def get_quota_status() -> dict:
         return f"{h_val} {'hour' if h_val == 1 else 'hours'}"
 
     rpd_limit_reached = bool(s.groq_api_key and (rem_rpd <= 0 or _QUOTA_STATE["last_status"] == "tpd_limited"))
-    t_reset_label = _fmt_win(tok_win_sec)
-    r_reset_label = _fmt_win(req_win_sec)
+    t_reset_label = _fmt_rem(tok_rem_sec)
+    r_reset_label = _fmt_rem(req_rem_sec)
     if rpd_limit_reached and not alert_message:
         alert_level = "critical"
-        alert_message = f"Rate limit reached · Resets in {r_reset_label}."
+        alert_message = f"Rate limit reached · Resets in {r_reset_label if req_rem_sec > 0 else t_reset_label}."
 
     return {
         "ai_configured": bool(s.groq_api_key),
@@ -195,8 +195,8 @@ def get_quota_status() -> dict:
         "remaining_tokens_tpm": rem_tpm,
         "limit_tokens_tpm": lim_tpm,
         "utc_date": _utc_today(),
-        "token_reset_seconds": tok_win_sec,
-        "request_reset_seconds": req_win_sec,
+        "token_reset_seconds": tok_rem_sec,
+        "request_reset_seconds": req_rem_sec,
         "token_reset_label": t_reset_label,
         "request_reset_label": r_reset_label,
         "rpd_limit_reached": rpd_limit_reached,
