@@ -286,204 +286,273 @@ export default function Home() {
         <section className="investigationCard">
           <div className="resultHero">
             <div className="verdictBlock">
-Use code with caution.
-<div className={"verdictBadge " + verdictTone(result.verdict)}>
+              <div className={"verdictBadge " + verdictTone(result.verdict)}>
+                <span className="verdictDot" />
+                {label(result.verdict)}
+              </div>
+              <h2>{summary}</h2>
+              <div className="metaLine">
+                <span>{label(result.status || "complete")}</span>
+                <span>•</span>
+                <span>{domains} independent {domains === 1 ? "domain" : "domains"}</span>
+              </div>
+            </div>
 
-{label(result.verdict)}
+            <div className={"confidenceMeter " + confidenceTone(confidence)}>
+              <div className="confidenceRing" style={{ "--confidence": confidence + "%" }}>
+                <div className="confidenceInner">{confidence}%</div>
+              </div>
+              <span className="confidenceLabel">CONFIDENCE</span>
+            </div>
+          </div>
 
-{summary}
+          <nav className="tabBar" aria-label="Investigation sections">
+            {tabs.map(([id, name]) => (
+              <button
+                key={id}
+                className={tab === id ? "active" : ""}
+                onClick={() => setTab(id)}
+              >
+                {name}
+                {id === "evidence" ? " (" + evidence.length + ")" : ""}
+                {id === "sources" ? " (" + sources.length + ")" : ""}
+              </button>
+            ))}
+          </nav>
 
-{label(result.status || "complete")}
-•
-{domains} independent {domains === 1 ? "domain" : "domains"}
+          {tab === "verdict" && (
+            <div className="tabPanel">
+              <div className="sectionHeader">
+                <span className="sectionKicker">CONCLUSION</span>
+                <h3>Verdict Breakdown</h3>
+              </div>
 
+              {noResults ? (
+                <div className="emptyBox">
+                  <div className="emptyIcon">?</div>
+                  <strong>No sufficiently relevant evidence</strong>
+                  <p>Factygo could not retrieve enough reliable web evidence to determine whether this claim is true or false. It will not invent a verdict.</p>
+                  <button className="secondaryButton" onClick={() => investigate()}>Search again</button>
+                </div>
+              ) : (
+                <>
+                  <p className="leadText">{breakdown}</p>
+                  <div className="statGrid">
+                    <div className="statBox"><span>SUPPORTING</span><strong>{supporting.length}</strong></div>
+                    <div className="statBox"><span>CONTRADICTING</span><strong>{contradicting.length}</strong></div>
+                    <div className="statBox"><span>CONTEXT</span><strong>{contextual.length}</strong></div>
+                    <div className="statBox"><span>SOURCES</span><strong>{sources.length}</strong></div>
+                  </div>
+                  <div className="infoNote">
+                    <span className="infoBadge">i</span>
+                    <div>
+                      <strong>Evidence overview</strong>
+                      <p>
+                        {supporting.length
+                          ? supporting.length + " supporting item" + (supporting.length === 1 ? "" : "s") + " found."
+                          : "No direct supporting evidence found."}{" "}
+                        {contradicting.length
+                          ? contradicting.length + " contradiction" + (contradicting.length === 1 ? "" : "s") + " detected."
+                          : "No direct contradiction detected."}
+                      </p>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
-<div className={"confidenceMeter " + confidenceTone(confidence)}>
-<div className="confidenceRing" style={{ "--confidence": confidence + "%" }}>
-{confidence}%
+          {tab === "evidence" && (
+            <div className="tabPanel">
+              <div className="sectionHeader">
+                <span className="sectionKicker">WEB RESEARCH</span>
+                <h3>Evidence ({evidence.length} items)</h3>
+              </div>
+              {evidence.length ? (
+                <div className="cardStack">
+                  {evidence.map((e, i) => (
+                    <article className="evidenceCard" key={e.id || e.evidence_id || i}>
+                      <div className="cardTopRow">
+                        <span className={"stance " + String(e.stance).toLowerCase()}>{label(e.stance)}</span>
+                        <div className="pillGroup">
+                          {e.relevance != null && <span className="metaPill">Relevance {Math.round(Number(e.relevance) <= 1 ? Number(e.relevance) * 100 : Number(e.relevance))}%</span>}
+                          {e.strength != null && <span className="metaPill">Strength {Math.round(Number(e.strength) <= 1 ? Number(e.strength) * 100 : Number(e.strength))}%</span>}
+                        </div>
+                      </div>
+                      <blockquote className="excerptText">“{e.excerpt}”</blockquote>
+                      {e.reason && <p className="reasonText">{e.reason}</p>}
+                      {e.source_url && (
+                        <a className="sourceLink" href={e.source_url} target="_blank" rel="noreferrer">
+                          Open original source ↗
+                        </a>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="emptyBox">
+                  <div className="emptyIcon">⌕</div>
+                  <strong>No web evidence</strong>
+                  <p>No sufficiently relevant evidence was retrieved.</p>
+                </div>
+              )}
+            </div>
+          )}
 
-CONFIDENCE
+          {tab === "sources" && (
+            <div className="tabPanel">
+              <div className="sectionHeader">
+                <span className="sectionKicker">WEB RESEARCH</span>
+                <h3>Sources ({sources.length} sources)</h3>
+              </div>
+              {sources.length ? (
+                <div className="cardStack">
+                  {sources.map((s, i) => {
+                    let displayDomain = s.domain || "";
+                    if (!displayDomain && s.url) {
+                      try {
+                        displayDomain = new URL(s.url).hostname.replace(/^www\./, "");
+                      } catch {
+                        displayDomain = "Unknown domain";
+                      }
+                    }
+                    return (
+                      <article className="sourceCard" key={s.url || i}>
+                        <div className="sourceMain">
+                          <a className="sourceTitle" href={s.url} target="_blank" rel="noreferrer">
+                            {s.title || s.url} ↗
+                          </a>
+                          <span className="sourceDomain">{displayDomain || "Unknown domain"}</span>
+                        </div>
+                        <div className="pillGroup">
+                          {s.source_tier && <span className="metaPill">Tier {s.source_tier}</span>}
+                          {s.source_score != null && (
+                            <span className="metaPill">{Math.round(s.source_score * 100)}/100</span>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="emptyBox">
+                  <div className="emptyIcon">◎</div>
+                  <strong>No sources retrieved</strong>
+                  <p>Factygo has no sources to display for this investigation.</p>
+                </div>
+              )}
+            </div>
+          )}
 
-{tabs.map(([id, name]) => (
-<button
-key={id}
-className={tab === id ? "active" : ""}
-onClick={() => setTab(id)}
->
-{name}
-{id === "evidence" ? " (" + evidence.length + ")" : ""}
-{id === "sources" ? " (" + sources.length + ")" : ""}
+          {tab === "claim" && (
+            <div className="tabPanel">
+              <div className="sectionHeader">
+                <span className="sectionKicker">CLAIM UNDERSTANDING</span>
+                <h3>Claim</h3>
+              </div>
+              <p className="leadText">{result.claim || text}</p>
+              {result.claim_analysis && (
+                <div className="statGrid">
+                  <div className="statBox"><span>SUBJECT</span><strong>{result.claim_analysis.subject || result.claim_analysis.domain || "Unknown"}</strong></div>
+                  <div className="statBox"><span>JURISDICTION</span><strong>{result.claim_analysis.jurisdiction || "Unknown"}</strong></div>
+                  <div className="statBox"><span>YEAR</span><strong>{result.claim_analysis.year || "Not specified"}</strong></div>
+                  <div className="statBox"><span>TYPE</span><strong>{label(result.claim_analysis.claim_type || result.claim_analysis.domain || "Unknown")}</strong></div>
+                </div>
+              )}
+              <h4 className="subHeading">Claim breakdown</h4>
+              {result.claims?.length ? (
+                <ul className="cleanList">
+                  {result.claims.map((c, idx) => (
+                    <li key={c.id || idx}>{c.text}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mutedText">No additional decomposition returned.</p>
+              )}
+            </div>
+          )}
 
-))}
-{tab === "verdict" && (
+          {tab === "research" && (
+            <div className="tabPanel">
+              <div className="sectionHeader">
+                <span className="sectionKicker">RESEARCH PLAN</span>
+                <h3>Framed questions</h3>
+              </div>
+              <p className="mutedText">Each question is researched independently. These raw answers are evidence inputs for the final synthesis, not separate verdicts.</p>
+              <div className="cardStack">
+                {(result.research_questions || []).map((q) => (
+                  <article className="questionCard" key={q.id}>
+                    <div className="cardTopRow">
+                      <span className="qBadge">Q{q.id}</span>
+                      <span className="metaPill">
+                        {q.evidence_count} source{q.evidence_count === 1 ? "" : "s"} · {label(q.status)}
+                      </span>
+                    </div>
+                    <h4>{q.question}</h4>
+                    <p>{q.raw_answer || "No raw answer returned."}</p>
+                    {q.sources?.length > 0 && (
+                      <div className="pillGroup">
+                        {q.sources.map((source, idx) => (
+                          <a
+                            key={source.url || idx}
+                            className="sourceLink"
+                            href={source.url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {source.title || source.domain} ↗
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
 
+          {tab === "analysis" && (
+            <div className="tabPanel">
+              <div className="sectionHeader">
+                <span className="sectionKicker">INVESTIGATION INTELLIGENCE</span>
+                <h3>Analysis</h3>
+              </div>
+              <div className="statGrid">
+                <div className="statBox"><span>SUPPORTING</span><strong>{supporting.length}</strong></div>
+                <div className="statBox"><span>CONTRADICTING</span><strong>{contradicting.length}</strong></div>
+                <div className="statBox"><span>CONTEXTUAL</span><strong>{contextual.length}</strong></div>
+                <div className="statBox"><span>INDEPENDENT DOMAINS</span><strong>{domains}</strong></div>
+              </div>
+              {result.evidence_analysis && (
+                <div className="infoNote">
+                  <span className="infoBadge">i</span>
+                  <div>
+                    <strong>Corroboration</strong>
+                    <p>
+                      {result.evidence_analysis.supporting_domains?.length || supporting.length} supporting ·{" "}
+                      {result.evidence_analysis.contradicting_domains?.length || contradicting.length} contradicting
+                    </p>
+                  </div>
+                </div>
+              )}
+              {result.methodology?.length > 0 && (
+                <>
+                  <h4 className="subHeading">Methodology</h4>
+                  <ul className="cleanList">
+                    {result.methodology.map((m, i) => (
+                      <li key={i}>{m}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
-
-CONCLUSION
-Verdict Breakdown
-
-{noResults ? (
-
-?
-No sufficiently relevant evidence
-Factygo could not retrieve enough reliable web evidence to determine whether this claim is true or false. It will not invent a verdict.
-<button className="secondaryButton" onClick={() => investigate()}>Search again
-
-) : (
-<>
-{breakdown}
-
-SUPPORTING{supporting.length}
-CONTRADICTING{contradicting.length}
-CONTEXT{contextual.length}
-SOURCES{sources.length}
-
-
-i
-
-Evidence overview
-
-{supporting.length
-? supporting.length + " supporting item" + (supporting.length === 1 ? "" : "s") + " found."
-: "No direct supporting evidence found."}{" "}
-{contradicting.length
-? contradicting.length + " contradiction" + (contradicting.length === 1 ? "" : "s") + " detected."
-: "No direct contradiction detected."}
-
-
-
-</>
-)}
-
-)}
-{tab === "evidence" && (
-
-
-WEB RESEARCHEvidence
-{evidence.length} items
-
-{evidence.length ? (
-
-{evidence.map((e, i) => (
-<article className="evidenceCard" key={e.id || i}>
-
-<span className={"stance " + String(e.stance).toLowerCase()}>{label(e.stance)}
-
-{e.relevance != null && Relevance {e.relevance}%}
-{e.strength != null && Strength {e.strength}%}
-
-
-“{e.excerpt}”
-{e.reason && {e.reason}}
-{e.source_url && Open original source ↗}
-
-))}
-
-) : (
-⌕No web evidenceNo sufficiently relevant evidence was retrieved.
-)}
-
-)}
-{tab === "sources" && (
-
-
-WEB RESEARCHSources
-{sources.length} sources
-
-{sources.length ? (
-
-{sources.map((s, i) => {
-let displayDomain = s.domain || "";
-if (!displayDomain && s.url) {
-try {
-displayDomain = new URL(s.url).hostname.replace(/^www./, "");
-} catch {
-displayDomain = "Unknown domain";
+      <footer className="footer">
+        FACTYGO · Evidence-first AI investigation · Evidence over assumption
+      </footer>
+    </main>
+  );
 }
-}
-return (
-<article className="sourceCard" key={s.url || i}>
-↗
-
-{s.title || s.url}
-{displayDomain || "Unknown domain"}
-
-
-{s.source_tier && Tier {s.source_tier}}
-{s.source_score != null && {Math.round(s.source_score * 100)}/100}
-
-
-);
-})}
-
-) : (
-◎No sources retrievedFactygo has no sources to display for this investigation.
-)}
-
-)}
-{tab === "claim" && (
-
-CLAIM UNDERSTANDING
-Claim
-{result.claim || text}
-{result.claim_analysis && (
-
-SUBJECT{result.claim_analysis.subject || "Unknown"}
-JURISDICTION{result.claim_analysis.jurisdiction || "Unknown"}
-YEAR{result.claim_analysis.year || "Not specified"}
-TYPE{label(result.claim_analysis.claim_type || "Unknown")}
-
-)}
-Claim breakdown
-{result.claims?.length ? {result.claims.map(c => {c.text})} : No additional decomposition returned.}
-
-)}
-{tab === "research" && (
-
-RESEARCH PLAN
-Framed questions
-Each question is researched independently. These raw answers are evidence inputs for the final synthesis, not separate verdicts.
-
-{(result.research_questions || []).map((q) => (
-
-
-Q{q.id}
-{q.evidence_count} source{q.evidence_count === 1 ? "" : "s"}{label(q.status)}
-
-{q.question}
-{q.raw_answer || "No raw answer returned."}
-{q.sources?.length > 0 && {q.sources.map((source) => {source.title || source.domain} ↗)}}
-
-))}
-
-
-)}
-{tab === "analysis" && (
-
-INVESTIGATION INTELLIGENCE
-Analysis
-
-SUPPORTING{supporting.length}
-CONTRADICTING{contradicting.length}
-CONTEXTUAL{contextual.length}
-INDEPENDENT DOMAINS{domains}
-
-{result.evidence_analysis && (
-
-Corroboration
-{result.evidence_analysis.supporting_domains?.length || 0} supporting domains · {result.evidence_analysis.contradicting_domains?.length || 0} contradicting domains
-
-)}
-{result.methodology?.length > 0 && <>Methodology{result.methodology.map((m, i) => {m})}</>}
-
-)}
-
-)}
-FACTYGO · Evidence-first AI investigation · Evidence over assumption
-
-);
-}
-
-<FollowUp>
-Use the **Copy** icon at the top-right of the code block, paste into **`frontend/app/page.js`**, and commit—let me know once **`factygo-web`** turns **Live**!
-</FollowUp>
